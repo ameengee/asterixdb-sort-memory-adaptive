@@ -1,0 +1,55 @@
+DataverseUse tpch
+Query:
+SELECT ELEMENT [
+RecordConstructor [
+  (
+    LiteralExpr [STRING] [l_linenumber]
+    :
+    FieldAccessor [
+      Variable [ Name=$l ]
+      Field=l_linenumber
+    ]
+  )
+  (
+    LiteralExpr [STRING] [count_order]
+    :
+    FunctionCall tpch.sql-count@1[
+      (
+        SELECT ELEMENT [
+        FieldAccessor [
+          Variable [ Name=#2 ]
+          Field=l
+        ]
+        ]
+        FROM [          Variable [ Name=#1 ]
+          AS Variable [ Name=#2 ]
+        ]
+      )
+    ]
+  )
+]
+]
+FROM [  FunctionCall Metadata.dataset@1[
+    LiteralExpr [STRING] [LineItem]
+  ]
+  AS Variable [ Name=$l ]
+]
+Groupby
+  Variable [ Name=$l_linenumber ]
+  :=
+  FieldAccessor [
+    Variable [ Name=$l ]
+    Field=l_linenumber
+  ]
+  GROUP AS Variable [ Name=#1 ]
+  (
+    l:=Variable [ Name=$l ]
+  )
+
+Orderby
+  FieldAccessor [
+    Variable [ Name=$l ]
+    Field=l_linenumber
+  ]
+  ASC
+
