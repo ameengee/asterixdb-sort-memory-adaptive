@@ -1,0 +1,99 @@
+DataverseUse test
+Query:
+RecordConstructor [
+  (
+    LiteralExpr [STRING] [count]
+    :
+    FunctionCall asterix.count@1[
+      (
+        SELECT ELEMENT [
+        FieldAccessor [
+          Variable [ Name=$t ]
+          Field=valplus
+        ]
+        ]
+        FROM [          FunctionCall Metadata.dataset@1[
+            LiteralExpr [STRING] [Test]
+          ]
+          AS Variable [ Name=$t ]
+        ]
+      )
+    ]
+  )
+  (
+    LiteralExpr [STRING] [average]
+    :
+    FunctionCall asterix.avg@1[
+      (
+        SELECT ELEMENT [
+        FieldAccessor [
+          Variable [ Name=$t ]
+          Field=valplus
+        ]
+        ]
+        FROM [          FunctionCall Metadata.dataset@1[
+            LiteralExpr [STRING] [Test]
+          ]
+          AS Variable [ Name=$t ]
+        ]
+      )
+    ]
+  )
+  (
+    LiteralExpr [STRING] [sum]
+    :
+    FunctionCall asterix.sum@1[
+      (
+        SELECT ELEMENT [
+        FieldAccessor [
+          Variable [ Name=$t ]
+          Field=valplus
+        ]
+        ]
+        FROM [          FunctionCall Metadata.dataset@1[
+            LiteralExpr [STRING] [Test]
+          ]
+          AS Variable [ Name=$t ]
+        ]
+      )
+    ]
+  )
+  (
+    LiteralExpr [STRING] [min]
+    :
+    FunctionCall asterix.min@1[
+      (
+        SELECT ELEMENT [
+        FieldAccessor [
+          Variable [ Name=$t ]
+          Field=valplus
+        ]
+        ]
+        FROM [          FunctionCall Metadata.dataset@1[
+            LiteralExpr [STRING] [Test]
+          ]
+          AS Variable [ Name=$t ]
+        ]
+      )
+    ]
+  )
+  (
+    LiteralExpr [STRING] [max]
+    :
+    FunctionCall asterix.max@1[
+      (
+        SELECT ELEMENT [
+        FieldAccessor [
+          Variable [ Name=$t ]
+          Field=valplus
+        ]
+        ]
+        FROM [          FunctionCall Metadata.dataset@1[
+            LiteralExpr [STRING] [Test]
+          ]
+          AS Variable [ Name=$t ]
+        ]
+      )
+    ]
+  )
+]
