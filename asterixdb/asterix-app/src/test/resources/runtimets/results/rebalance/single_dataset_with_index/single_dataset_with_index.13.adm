@@ -1,0 +1,32 @@
+distribute result [$$l]
+-- DISTRIBUTE_RESULT  |PARTITIONED|
+  exchange
+  -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
+    project ([$$l])
+    -- STREAM_PROJECT  |PARTITIONED|
+      exchange
+      -- SORT_MERGE_EXCHANGE [$$14(ASC), $$15(ASC) ]  |PARTITIONED|
+        select (eq($$l.getField(10), "1994-01-20"))
+        -- STREAM_SELECT  |PARTITIONED|
+          exchange
+          -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
+            unnest-map [$$14, $$15, $$l] <- index-search("LineItem", 0, "tpch", "LineItem", FALSE, FALSE, 2, $$22, $$23, 2, $$22, $$23, TRUE, TRUE, TRUE)
+            -- BTREE_SEARCH  |PARTITIONED|
+              exchange
+              -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
+                order (ASC, $$22) (ASC, $$23)
+                -- STABLE_SORT [$$22(ASC), $$23(ASC)]  |PARTITIONED|
+                  exchange
+                  -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
+                    project ([$$22, $$23])
+                    -- STREAM_PROJECT  |PARTITIONED|
+                      exchange
+                      -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
+                        unnest-map [$$21, $$22, $$23] <- index-search("lineitem_shipdateIx", 0, "tpch", "LineItem", FALSE, FALSE, 1, $$19, 1, $$20, TRUE, TRUE, TRUE)
+                        -- BTREE_SEARCH  |PARTITIONED|
+                          exchange
+                          -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
+                            assign [$$19, $$20] <- ["1994-01-20", "1994-01-20"]
+                            -- ASSIGN  |PARTITIONED|
+                              empty-tuple-source
+                              -- EMPTY_TUPLE_SOURCE  |PARTITIONED|
