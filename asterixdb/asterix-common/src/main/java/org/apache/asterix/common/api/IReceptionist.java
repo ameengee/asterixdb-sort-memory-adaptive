@@ -18,50 +18,31 @@
  */
 package org.apache.asterix.common.api;
 
-import org.apache.asterix.common.dataflow.ICcApplicationContext;
+import java.util.Map;
+
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.http.api.IServletRequest;
 
-public interface IClientRequest {
+public interface IReceptionist {
 
     /**
-     * A system wide unique id representing this {@link IClientRequest}
+     * Generates a request reference based on {@code request}
      *
-     * @return the system request id
+     * @param request
+     * @return a request reference representing the request
      */
-    String getId();
+    IRequestReference welcome(IServletRequest request);
 
     /**
-     * A user supplied id representing this {@link IClientRequest}
+     * Generates a {@link IClientRequest} based on the requests parameters
      *
-     * @return the client supplied request id
-     */
-    String getClientContextId();
-
-    /**
-     * Mark the request as complete, non-cancellable anymore
-     */
-    void complete();
-
-    /**
-     * Mark the request as cancellable
-     */
-    void markCancellable();
-
-    /**
-     * @return true if the request can be cancelled. Otherwise false.
-     */
-    boolean isCancellable();
-
-    /**
-     * Cancel a request
-     *
-     * @param appCtx
+     * @param requestRef
+     * @param clientContextId
+     * @param statement
+     * @param getOptionalParameters
+     * @return A client request
      * @throws HyracksDataException
      */
-    void cancel(ICcApplicationContext appCtx) throws HyracksDataException;
-
-    /**
-     * @return A json representation of this request
-     */
-    String toJson();
+    IClientRequest requestReceived(IRequestReference requestRef, String clientContextId, String statement,
+            Map<String, String> getOptionalParameters) throws HyracksDataException;
 }
