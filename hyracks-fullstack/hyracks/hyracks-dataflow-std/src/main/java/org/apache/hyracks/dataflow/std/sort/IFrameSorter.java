@@ -29,4 +29,8 @@ public interface IFrameSorter extends ISorter {
 
     boolean insertFrame(ByteBuffer inputBuffer) throws HyracksDataException;
 
+    // DUMMY memory-adaptive sort: allow sort budget of memory to be changed
+    // between runs. Only the sorter's own budget is affected.
+    void setMaxSortMemory(long maxSortMemory);
+
 }

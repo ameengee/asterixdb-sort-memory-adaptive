@@ -70,7 +70,8 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     protected final IFrame outputFrame;
     protected final int outputLimit;
 
-    protected final long maxSortMemory;
+    // protected final long maxSortMemory;
+    protected long maxSortMemory; // non-final: DUMMY memory-adaptive sort can change it between runs
     protected long totalMemoryUsed;
     protected int[] tPointers;
     protected final int[] tmpPointer;
@@ -130,6 +131,12 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         this.tmpPointer = new int[ptrSize];
     }
 
+    // DUMMY memory-adaptive sort: change the in-memory budget gate (checked first in insertFrame).
+    @Override
+    public void setMaxSortMemory(long maxSortMemory) {
+        this.maxSortMemory = maxSortMemory;
+    }
+
     @Override
     public void reset() throws HyracksDataException {
         this.tupleCount = 0;
@@ -163,6 +170,14 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
 
     @Override
     public void sort() throws HyracksDataException {
+        // DUMMY memory-adaptive sort: proof that this run actually LOADED frames up to its budget.
+        // Fires once per run (each spill + the final in-memory batch), just before the run is sorted.
+        if (LOGGER.isInfoEnabled()) {
+            long fillPct = (maxSortMemory > 0 && maxSortMemory != Long.MAX_VALUE)
+                    ? (100L * totalMemoryUsed / maxSortMemory) : -1;
+            LOGGER.warn("adaptive-sort-run: framesLoaded={} bytesUsed={} budgetBytes={} fillPct={} tuples={}",
+                    getFrameCount(), totalMemoryUsed, maxSortMemory, fillPct, tupleCount);
+        }
         if (tPointers == null || tPointers.length < tupleCount * ptrSize) {
             tPointers = new int[tupleCount * ptrSize];
         }
