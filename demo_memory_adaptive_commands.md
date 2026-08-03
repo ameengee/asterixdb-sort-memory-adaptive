@@ -2,7 +2,7 @@
 
 Runnable, copy-paste commands to launch the cluster, load data, run a spilling
 `ORDER BY`, and read the memory-adaptive log lines produced by our modified
-`AbstractExternalSortRunGenerator`.
+`AbstractExternalSortRunGenerator` (simulated broker) and `AbstractFrameSorter`.
 
 > Everything runs against the **pre-built** assembly in `target/` with only our one
 > jar swapped in (`repo/hyracks-dataflow-std-0.3.10-SNAPSHOT.jar`). No full rebuild.
@@ -16,7 +16,7 @@ Runnable, copy-paste commands to launch the cluster, load data, run a spilling
 # cannot load it. /opt/homebrew/opt/openjdk is OpenJDK 26.
 export JAVA_HOME=/opt/homebrew/opt/openjdk
 
-# Cluster directory (the sample cluster's opt/local) and the SQL++ query endpoint.
+# Cluster dir (the sample cluster's opt/local) and the SQL++ query endpoint.
 export CLUSTER=/Users/ameen/Codebase/asterixdb/asterixdb/asterix-server/target/asterix-server-0.9.10-SNAPSHOT-binary-assembly/apache-asterixdb-0.9.10-SNAPSHOT/opt/local
 export Q=http://127.0.0.1:19002/query/service
 
@@ -31,8 +31,7 @@ export Q=http://127.0.0.1:19002/query/service
 ```bash
 cd "$CLUSTER"
 bin/start-sample-cluster.sh
-# Expect: "INFO: Cluster started and is ACTIVE."
-# Web console: http://localhost:19001
+# Expect: "INFO: Cluster started and is ACTIVE."   Web console: http://localhost:19001
 ```
 
 ---
@@ -64,101 +63,122 @@ INSERT INTO ds (
 curl -s "$Q" --data-urlencode 'statement=SELECT VALUE count(*) FROM test.ds;'
 ```
 
----
-
-## 3. Run the spilling `ORDER BY` (triggers the adaptation)
-
-Small `compiler.sortmemory` ⇒ many runs ⇒ many adaptations. `ORDER BY r.k`
-(non-key) forces a real external sort. Result body is discarded (`-o /dev/null`);
-we only care about the logs.
-
-```bash
-curl -s "$Q" -o /dev/null -w 'http=%{http_code} bytes=%{size_download} time=%{time_total}s\n' \
-  --data-urlencode 'statement=
-USE test;
-SET `compiler.sortmemory` "1MB";
-SELECT VALUE r FROM ds AS r ORDER BY r.k;'
-```
+Data persists across cluster restarts (LSM storage), so you only load it once.
 
 ---
 
-## 4. Read the adaptive log lines
+## 3. Run the query and capture *just this run's* logs
 
-There are **two** log lines, and they tell different halves of the story:
+`ORDER BY r.k` (a non-key field) forces a real external sort; the result body is
+discarded (`-o /dev/null`) — we only want the logs.
 
-- `adaptive-sort:` — the *decision*: the budget chosen for the **next** run
-  (emitted by `AbstractExternalSortRunGenerator`).
-- `adaptive-sort-run:` — the *proof*: how many frames the run **actually loaded**
-  and what fraction of the budget it **actually used** before spilling
-  (emitted by `AbstractFrameSorter.sort()`, once per run).
+**Budget choice** (via `SET \`compiler.sortmemory\``):
+- **`8MB`** — big runs; a single query exercises **all five decision paths** (use this for the demo).
+- **`1MB`** — tiny budget; maximum spilling / many small runs.
 
-```bash
-# 4a. full log lines (path + timestamp + thread + message)
-grep -E "adaptive-sort:|adaptive-sort-run:" "$CLUSTER"/logs/nc-asterix_nc*.log
-
-# 4b. ISOLATED clean format (strip path/timestamp/thread; keep "INFO ... adaptive-sort... ...")
-grep -hE "adaptive-sort:|adaptive-sort-run:" "$CLUSTER"/logs/nc-asterix_nc*.log | grep -o 'INFO.*'
-
-# 4c. just the messages (roll/budget decisions AND actual per-run usage), latest run only.
-#     NOTE: logs accumulate across query runs, so use tail (not head) to see the most recent run.
-grep -hE "adaptive-sort:|adaptive-sort-run:" "$CLUSTER"/logs/nc-asterix_nc1.log | grep -o 'adaptive-sort.*' | tail -26
-
-# 4d. just the PROOF line (actual frames loaded + fill %)
-grep -oh 'adaptive-sort-run:.*' "$CLUSTER"/logs/nc-asterix_nc*.log
-```
-
-**Two log lines, paired** — each `adaptive-sort:` budget decision is followed by the
-`adaptive-sort-run:` that consumed it:
-
-```
-adaptive-sort:     roll=2 nextRunFrames=16                                   <- decide: next run gets 16 frames
-adaptive-sort-run: framesLoaded=14 bytesUsed=517552  budgetBytes=524288  fillPct=98   <- proof: loaded 14, used 98%
-adaptive-sort:     roll=3 nextRunFrames=32
-adaptive-sort-run: framesLoaded=28 bytesUsed=1035104 budgetBytes=1048576 fillPct=98
-adaptive-sort:     roll=3 nextRunFrames=64
-adaptive-sort-run: framesLoaded=56 bytesUsed=2070208 budgetBytes=2097152 fillPct=98
-adaptive-sort:     roll=3 nextRunFrames=124
-adaptive-sort-run: framesLoaded=109 bytesUsed=4029512 budgetBytes=4063232 fillPct=99
-```
-
-Reading it:
-- **framesLoaded tracks the budget** (14 → 28 → 56 → 109, doubling with 16 → 32 → 64 → 124):
-  the run really did absorb more/less data when the knob moved.
-- **fillPct ≈ 98–99%**: each spilled run used essentially *all* the memory it had
-  (a spill triggers exactly when the next frame no longer fits).
-- **framesLoaded < budget frames** (14 vs 16): merge sort's byte budget is
-  `frameBytes + 2×pointerBytes` per frame, so pointers consume ~12% of the byte
-  budget; `bytesUsed/budgetBytes` is the honest ~98%.
-- **The final run is a partial leftover** (e.g. `fillPct=35`): the last batch flushed
-  at `close()` after input ended — it never fills up. Every *spilled* run is ~99%.
-
-**Example output of 4b** (one NC; `roll` = 1 keep / 2 halve / 3 double,
-`nextRunFrames` = budget for the next run in 32 KB frames, `min/max` = floor/cap):
-
-```
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=1 nextRunFrames=31 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=2 nextRunFrames=16 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=2 nextRunFrames=16 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=3 nextRunFrames=32 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=3 nextRunFrames=64 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=3 nextRunFrames=124 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=3 nextRunFrames=124 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=1 nextRunFrames=124 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=1 nextRunFrames=124 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=3 nextRunFrames=124 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=3 nextRunFrames=124 (min=16, max=124)
-INFO  org.apache.hyracks.dataflow.std.sort.AbstractExternalSortRunGenerator - adaptive-sort: roll=3 nextRunFrames=124 (min=16, max=124)
-```
-
-Reading it: start at nominal **31** frames → halve, clamped up to floor **16** →
-doubles up to cap **124** → stays pinned. One trace exercises keep, halve, double,
-and both clamps. The `Random(0)` seed makes it deterministic (both NCs identical),
-so it reproduces every run — change `new Random(0)` to `new Random()` in
-`AbstractExternalSortRunGenerator` for live variation.
+The NC logs **accumulate across queries**, so we record the log's line count *before*
+the query and read only the lines added *after* — that isolates one clean run:
 
 ```bash
-# optional: save a clean trace for slides
-grep -h "adaptive-sort:" "$CLUSTER"/logs/nc-asterix_nc*.log | grep -o 'INFO.*' > adaptive_trace.txt
+LOG="$CLUSTER/logs/nc-asterix_nc1.log"
+SINCE=$(wc -l < "$LOG")            # remember the log position BEFORE the query
+
+curl -s "$Q" -o /dev/null -w 'query http=%{http_code}\n' \
+  --data-urlencode 'statement=USE test; SET `compiler.sortmemory` "8MB"; SELECT VALUE r FROM ds AS r ORDER BY r.k;'
+
+# snapshot ONLY this run's adaptive lines (decisions + proof), stripped to the clean message:
+tail -n +$((SINCE+1)) "$LOG" | grep -o 'adaptive-sort.*' > /tmp/thisrun.log
+```
+
+> Re-running the query? Redo all three lines (reset `SINCE`, query, snapshot) so the
+> snapshot stays a single run. (`nc2` is identical in structure — swap the filename to
+> inspect the other partition.)
+
+---
+
+## 4. See every execution path
+
+Two kinds of line:
+- `adaptive-sort:` — the broker **decision** (from `AbstractExternalSortRunGenerator`). Five tags:
+  - `grant-grow`  — not a victim + broker granted more → **grow the current run, no spill**
+  - `victim-full` — victimized while full → spill and **shrink** the budget
+  - `victim-periodic-shrink` — periodic poll caught a victim, but loaded data still fits the halved
+    budget → **just tighten, NO spill** (keep accumulating)  ← the efficiency fix
+  - `victim-periodic-spill`  — periodic poll caught a victim and loaded data exceeds the halved
+    budget → **must spill** to give memory back, then shrink
+  - `denied`      — denied (or at the cap) → spill, budget **unchanged**
+- `adaptive-sort-run:` — the **proof** (from `AbstractFrameSorter.sort()`, once per run):
+  frames the run *actually loaded* and what fraction of the budget it *actually used*.
+
+Tunables (in `AbstractExternalSortRunGenerator`): `VICTIM_PROBABILITY` (0.3; grant
+chance is `1 - VICTIM_PROBABILITY`) and `VICTIM_CHECK_INTERVAL` (poll every N frames;
+currently 10 — small so the periodic paths show up readily).
+
+All commands below read the single-run snapshot `/tmp/thisrun.log` from step 3.
+
+```bash
+# 4a. COUNTS per decision path -- at 8MB all five should be > 0
+grep -oh 'adaptive-sort: [a-z-]*' /tmp/thisrun.log | sort | uniq -c
+
+# 4b. FULL trace in order (decisions interleaved with proof lines)
+head -40 /tmp/thisrun.log
+
+# 4c. GRANT-GROW -- broker granted more; grew the CURRENT run (consecutive grows, no proof between)
+grep 'grant-grow' /tmp/thisrun.log | head
+
+# 4d. VICTIM-PERIODIC-SHRINK -- THE FIX: victimized mid-run but data still fit -> tighten, NO spill
+grep 'victim-periodic-shrink' /tmp/thisrun.log | head
+
+# 4e. VICTIM-PERIODIC-SPILL -- victimized and over the halved budget -> had to spill
+grep 'victim-periodic-spill' /tmp/thisrun.log | head
+
+# 4f. VICTIM-FULL / DENIED -- sorter filled up, asked the broker, got victimized / denied -> spill
+grep -E 'victim-full|denied' /tmp/thisrun.log | head
+
+# 4g. PROOF -- actual frames loaded + fill% per run (98-99% = a naturally-full spill)
+grep 'adaptive-sort-run:' /tmp/thisrun.log | head
+```
+
+### How to read the trace (real lines)
+
+**`grant-grow` enlarges the CURRENT run without spilling** — two grows with **no
+`adaptive-sort-run` between them**, then a spill that loaded far more than the run
+started with:
+```
+adaptive-sort: grant-grow budgetFrames=32 (min=16, max=124)
+adaptive-sort: grant-grow budgetFrames=64 (min=16, max=124)
+adaptive-sort-run: framesLoaded=56 bytesUsed=2070208 budgetBytes=2097152 fillPct=98 tuples=9800
+```
+
+**`victim-periodic-shrink` — the fix** — victimized mid-run, but what was loaded still
+fit the halved budget, so it tightened and kept going (no forced spill at that moment;
+the run later spills naturally at ~98%):
+```
+adaptive-sort: victim-periodic-shrink budgetFrames=63 (min=16, max=1020)
+adaptive-sort-run: framesLoaded=55 bytesUsed=2033240 budgetBytes=2064384 fillPct=98 tuples=9625
+```
+
+**`victim-periodic-spill`** — victimized and already over the halved budget, so it had
+to spill to give memory back:
+```
+adaptive-sort: victim-periodic-spill budgetFrames=62 (min=16, max=124)
+adaptive-sort-run: framesLoaded=54 bytesUsed=1996272 budgetBytes=2031616 fillPct=98 tuples=9450
+```
+
+Key reads:
+- **framesLoaded tracks the budget** — a run that grows mid-life loads far more than the
+  budget it started with (proof `grant-grow` truly enlarged the live run, no spill).
+- **fillPct is a lie detector** — ~98–99% means the run spilled because it was genuinely
+  full; a low fillPct next to a periodic line would mean a *forced* early spill.
+- **framesLoaded < budget frames** (e.g. 56 vs 64) — merge sort's byte budget is
+  `frameBytes + 2×pointerBytes` per frame, so pointers eat ~12%; `bytesUsed/budgetBytes`
+  is the honest ~98%.
+- The `Random(0)` seed makes it deterministic (both NCs identical); change it to
+  `new Random()` in `AbstractExternalSortRunGenerator` for live variation.
+
+```bash
+# optional: save this run's clean trace for slides
+cp /tmp/thisrun.log adaptive_trace.txt
 ```
 
 ---
@@ -178,13 +198,16 @@ bin/stop-sample-cluster.sh
   picks Java 17 and dies with `UnsupportedClassVersionError` (class file version 65).
 - **`ORDER BY` a non-primary-key field** (`k`) — sorting by the PK lets the optimizer
   skip the sort (data is already stored PK-ordered).
-- **Small `compiler.sortmemory`** — adaptation only fires at run boundaries; if the
-  sort fits in memory it never spills and never adapts.
+- **Budget vs. paths** — `8MB` makes runs span many frames so the periodic poll lands
+  mid-fill and you see all five tags in one query; `1MB` maximizes spilling. A sort that
+  fits fully in memory never spills and never adapts.
 - **No `LIMIT`** — a `LIMIT` routes to the top-K sorter (a different class we didn't
   modify), so no `adaptive-sort:` lines.
+- **Logs accumulate** — always use the `SINCE`/`tail` snapshot from step 3 to view a
+  single run; otherwise `grep` mixes lines from every previous query.
 - **The jar** — the running cluster loads our code from
   `.../apache-asterixdb-0.9.10-SNAPSHOT/repo/hyracks-dataflow-std-0.3.10-SNAPSHOT.jar`.
   To pick up new changes: rebuild it
-  (`cd hyracks-fullstack && mvn -o -pl hyracks/hyracks-dataflow-std package -DskipTests`)
-  and copy it over that path, then restart the cluster.
+  (`cd hyracks-fullstack && mvn -o -pl hyracks/hyracks-dataflow-std package -DskipTests`),
+  copy it over that path, then restart the cluster.
 ```

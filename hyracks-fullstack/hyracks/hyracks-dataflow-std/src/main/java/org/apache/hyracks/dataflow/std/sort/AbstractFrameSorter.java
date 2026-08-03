@@ -131,10 +131,17 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         this.tmpPointer = new int[ptrSize];
     }
 
-    // DUMMY memory-adaptive sort: change the in-memory budget gate (checked first in insertFrame).
+    // [ADDED for memory-adaptive sort; no original AsterixDB equivalent]
+    // Change the in-memory budget gate (checked first in insertFrame) so the budget can move at runtime.
     @Override
     public void setMaxSortMemory(long maxSortMemory) {
         this.maxSortMemory = maxSortMemory;
+    }
+
+    // [ADDED for memory-adaptive sort] bytes currently held by this run (used-vs-budget decisions).
+    @Override
+    public long getUsedMemory() {
+        return totalMemoryUsed;
     }
 
     @Override
@@ -170,6 +177,8 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
 
     @Override
     public void sort() throws HyracksDataException {
+        // [ADDED for memory-adaptive sort] original AsterixDB sort() had NO logging block;
+        //       it began directly at the `if (tPointers == null ...)` line below.
         // DUMMY memory-adaptive sort: proof that this run actually LOADED frames up to its budget.
         // Fires once per run (each spill + the final in-memory batch), just before the run is sorted.
         if (LOGGER.isInfoEnabled()) {
@@ -178,6 +187,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
             LOGGER.warn("adaptive-sort-run: framesLoaded={} bytesUsed={} budgetBytes={} fillPct={} tuples={}",
                     getFrameCount(), totalMemoryUsed, maxSortMemory, fillPct, tupleCount);
         }
+        // [END ADDED] -- original AsterixDB sort() resumes here:
         if (tPointers == null || tPointers.length < tupleCount * ptrSize) {
             tPointers = new int[tupleCount * ptrSize];
         }
