@@ -52,6 +52,8 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
     //  3. setup frequency of checking. Every x number of frames (~100), check victim-ness before inserting frame
     //      - what state is the system?
     //              - unused memory? currently sorting? used but not sorting? something else?
+    //
+    //
     private static final Logger ADAPT_LOGGER = LogManager.getLogger();
     private static final int ADAPT_CAP_MULTIPLIER = 4;
     private static final double VICTIM_PROBABILITY = 0.3; // tunable: P(broker victimizes us)

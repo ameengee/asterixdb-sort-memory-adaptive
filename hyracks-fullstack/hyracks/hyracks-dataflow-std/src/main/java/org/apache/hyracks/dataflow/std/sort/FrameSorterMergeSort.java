@@ -23,7 +23,6 @@ import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.INormalizedKeyComputerFactory;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.std.buffermanager.IFrameBufferManager;
 
 public class FrameSorterMergeSort extends AbstractFrameSorter {
@@ -54,10 +53,12 @@ public class FrameSorterMergeSort extends AbstractFrameSorter {
         sort(0, tupleCount);
     }
 
-    @Override
-    protected long getRequiredMemory(FrameTupleAccessor frameAccessor) {
-        return super.getRequiredMemory(frameAccessor) + ptrSize * frameAccessor.getTupleCount() * Integer.BYTES;
-    }
+    // [Stage 1] The scratch reservation moved to AbstractFrameSorter.getRequiredMemory (now 2x), so this
+    // +1x override is redundant and disabled. (Original kept for reference.)
+    //   @Override
+    //   protected long getRequiredMemory(FrameTupleAccessor frameAccessor) {
+    //       return super.getRequiredMemory(frameAccessor) + ptrSize * frameAccessor.getTupleCount() * Integer.BYTES;
+    //   }
 
     @Override
     public void close() {
