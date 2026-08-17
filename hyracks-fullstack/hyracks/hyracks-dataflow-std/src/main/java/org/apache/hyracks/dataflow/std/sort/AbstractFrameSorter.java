@@ -71,15 +71,13 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     protected final int outputLimit;
 
     // protected final long maxSortMemory;
-    protected long maxSortMemory; // non-final: DUMMY memory-adaptive sort can change it between runs
+    protected long maxSortMemory; // non-final: memory-adaptive sort can change it between runs
     protected long totalMemoryUsed;
     protected int[] tPointers;
     protected final int[] tmpPointer;
     protected int tupleCount;
 
-    // ---- Stage 1: incremental cache-sized bucket sort (ADDED; no original AsterixDB equivalent) ----
-    // Original AsterixDB accumulated every frame, then at flush built one tPointers array over ALL
-    // frames and sorted it in a single pass. Stage 1 instead builds each frame's pointers as they arrive.
+    // [ADDED] Incremental cache-sized bucket sort. builds each frame's pointers as they arrive.
     private static final long BUCKET_TARGET_BYTES = 256L * 1024; // ~L2 cache; tunable
     private long bucketTargetBytes = BUCKET_TARGET_BYTES;
     private long currentBucketBytes; // data bytes accumulated in the current, unsealed bucket
@@ -143,7 +141,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         this.tmpPointer = new int[ptrSize];
     }
 
-    // [ADDED for memory-adaptive sort; no original AsterixDB equivalent]
+    // [ADDED for memory-adaptive sort]
     // Change the in-memory budget gate (checked first in insertFrame) so the budget can move at runtime.
     @Override
     public void setMaxSortMemory(long maxSortMemory) {
@@ -154,6 +152,19 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     @Override
     public long getUsedMemory() {
         return totalMemoryUsed;
+    }
+
+    // [ADDED for memory-adaptive sort] total loaded tuples, and how many are already sorted. Tuples in
+    // sealed buckets are sorted (currentBucketStart of them); [currentBucketStart, tupleCount) is the
+    // current unsealed (not-yet-sorted) bucket. Used to build the operator's 3-tier MemoryStatus.
+    @Override
+    public int getTupleCount() {
+        return tupleCount;
+    }
+
+    @Override
+    public int getSortedTupleCount() {
+        return currentBucketStart;
     }
 
     @Override
@@ -206,32 +217,29 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     }
 
     protected long getRequiredMemory(FrameTupleAccessor frameAccessor) {
+        // The stable merges also need a scratch array same size as tPointers, so reserve 2x the pointer memory.
         // ORIGINAL: frame bytes + ONE pointer array (tPointers):
         //   return (long) frameAccessor.getBuffer().capacity() + ptrSize * frameAccessor.getTupleCount() * Integer.BYTES;
-        // [Stage 1] the stable merges also need a scratch array (tScratch) the same size as tPointers,
-        // so reserve 2x the pointer memory. (FrameSorterMergeSort's old +1x override is now redundant
-        // and is commented out there.)
-        return (long) frameAccessor.getBuffer().capacity()
-                + 2L * ptrSize * frameAccessor.getTupleCount() * Integer.BYTES;
+        return (long) frameAccessor.getBuffer().capacity() + 2L * ptrSize * frameAccessor.getTupleCount() * Integer.BYTES;
     }
 
     @Override
     public void sort() throws HyracksDataException {
         // [ADDED for memory-adaptive sort] original AsterixDB sort() had NO logging block;
-        //       it began directly at the `if (tPointers == null ...)` line below.
-        // DUMMY memory-adaptive sort: proof that this run actually LOADED frames up to its budget.
-        // Fires once per run (each spill + the final in-memory batch), just before the run is sorted.
         if (LOGGER.isInfoEnabled()) {
             long fillPct = (maxSortMemory > 0 && maxSortMemory != Long.MAX_VALUE)
                     ? (100L * totalMemoryUsed / maxSortMemory) : -1;
             LOGGER.warn("adaptive-sort-run: framesLoaded={} bytesUsed={} budgetBytes={} fillPct={} tuples={}",
                     getFrameCount(), totalMemoryUsed, maxSortMemory, fillPct, tupleCount);
         }
-        // [END ADDED] -- original AsterixDB sort() resumes here.
+
+        // ORIGINAL sort(): build ONE tPointers array over ALL frames, then sort the whole thing in one pass.
+
+        // Now, pointers are built incrementally in insertFrame and full buckets are already sorted.
+        // Here we just seal the last bucket and merge the buckets.
+
+
         //
-        // ORIGINAL AsterixDB sort(): build ONE tPointers array over ALL frames, then sort the whole
-        // thing in one pass. Replaced by Stage 1 (pointers were built incrementally in insertFrame and
-        // full buckets were already sorted; here we just seal the last bucket and merge the buckets):
         //   if (tPointers == null || tPointers.length < tupleCount * ptrSize) {
         //       tPointers = new int[tupleCount * ptrSize];
         //   }
@@ -263,12 +271,12 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         //   }
         //   if (tupleCount > 0) { sortTupleReferences(); }
         //
-        // [Stage 1] seal the final (partial) bucket, then stably merge all sorted buckets.
+
+        // Seal the final (partial) bucket, then stably merge all sorted buckets.
         sealBucket();
         if (numBuckets > 1) {
             mergeBuckets();
         }
-        // if numBuckets <= 1, tPointers[0, tupleCount) is already fully sorted (the single bucket).
     }
 
     // [Stage 1] Build this frame's tuple pointers (frameId, start, end, normalized keys) and append

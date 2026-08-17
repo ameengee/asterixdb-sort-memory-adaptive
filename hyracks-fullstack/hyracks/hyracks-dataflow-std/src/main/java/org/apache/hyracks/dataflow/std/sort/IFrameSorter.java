@@ -29,13 +29,17 @@ public interface IFrameSorter extends ISorter {
 
     boolean insertFrame(ByteBuffer inputBuffer) throws HyracksDataException;
 
-    // [ADDED for memory-adaptive sort; no original AsterixDB equivalent]
-    // Allow the sort's memory budget to be changed between runs; only the sorter's own budget gate
-    // is affected. Original AsterixDB IFrameSorter had only getFrameCount() and insertFrame().
+    // [ADDED for memory-adaptive sort]
+    // Allow the sort's memory budget to be changed between runs; only the sorter's own budget gate is affected.
     void setMaxSortMemory(long maxSortMemory);
 
     // [ADDED for memory-adaptive sort] current in-memory bytes held by this run (frame bytes +
     // pointer reservations). Lets the run generator decide whether a shrink actually requires a spill.
     long getUsedMemory();
+
+    // [ADDED for memory-adaptive sort] total tuples loaded, and how many are already sorted (in sealed buckets).
+    int getTupleCount();
+
+    int getSortedTupleCount();
 
 }
