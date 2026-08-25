@@ -21,6 +21,7 @@ package org.apache.hyracks.dataflow.std.sort;
 
 import java.nio.ByteBuffer;
 
+import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 public interface IFrameSorter extends ISorter {
@@ -41,5 +42,9 @@ public interface IFrameSorter extends ISorter {
     int getTupleCount();
 
     int getSortedTupleCount();
+
+    // [Stage 2] Spill only the already-sorted buckets as a run and keep the unsorted tail in memory.
+    // Returns false if nothing is sorted yet (caller should spill everything instead).
+    boolean spillSortedKeepUnsorted(IFrameWriter writer) throws HyracksDataException;
 
 }

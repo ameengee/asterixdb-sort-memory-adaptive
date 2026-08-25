@@ -83,9 +83,14 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     private long currentBucketBytes; // data bytes accumulated in the current, unsealed bucket
     private int builtTuples; // # tuples whose pointers are already built into tPointers
     private int currentBucketStart; // tuple index where the current (unsealed) bucket starts
-    private int[] bucketEnds; // end tuple index (exclusive) of each sealed, sorted bucket
-    private int numBuckets; // # sealed buckets
+    private int[] bucketEnds; // end tuple index (exclusive) of each sorted run (a bucket, or merged buckets)
+    private int numBuckets; // # sorted runs
+    private int[] bucketLevels; // [Stage 3] each run's merge level. Used to merge runs in a cascade.
+    private static final int MERGE_FAN_IN = 2; // [Stage 3] Cascade fan-in: merge whenever this many newest runs share a level.
+    private int mergeFanIn = MERGE_FAN_IN;
     private int[] tScratch; // scratch buffer for the stable merges (bucket sort + bucket merge)
+    // [Stage 2] frames [0, sortedFrameCount) belong to sealed (sorted) buckets; the rest are the unsorted tail
+    private int sortedFrameCount;
 
     private final FrameTupleAccessor fta2;
     private final BufferInfo info = new BufferInfo(null, -1, -1);
@@ -177,6 +182,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         this.currentBucketStart = 0;
         this.currentBucketBytes = 0;
         this.numBuckets = 0;
+        this.sortedFrameCount = 0;
     }
 
     @Override
@@ -186,13 +192,6 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
             return true;
         }
         long requiredMemory = getRequiredMemory(inputTupleAccessor);
-        // ORIGINAL AsterixDB (accept the frame; all sorting deferred to sort()):
-        //   if (totalMemoryUsed + requiredMemory <= maxSortMemory && bufferManager.insertFrame(inputBuffer) >= 0) {
-        //       // we have enough memory
-        //       totalMemoryUsed += requiredMemory;
-        //       tupleCount += inputTupleAccessor.getTupleCount();
-        //       return true;
-        //   }
         // [Stage 1] on accept, immediately build this frame's pointers and, once a bucket fills, sort
         // it -- so sort CPU overlaps input arrival instead of spiking all at once at flush time.
         if (totalMemoryUsed + requiredMemory <= maxSortMemory) {
@@ -220,66 +219,33 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         // The stable merges also need a scratch array same size as tPointers, so reserve 2x the pointer memory.
         // ORIGINAL: frame bytes + ONE pointer array (tPointers):
         //   return (long) frameAccessor.getBuffer().capacity() + ptrSize * frameAccessor.getTupleCount() * Integer.BYTES;
-        return (long) frameAccessor.getBuffer().capacity() + 2L * ptrSize * frameAccessor.getTupleCount() * Integer.BYTES;
+        return (long) frameAccessor.getBuffer().capacity()
+                + 2L * ptrSize * frameAccessor.getTupleCount() * Integer.BYTES;
     }
 
     @Override
     public void sort() throws HyracksDataException {
-        // [ADDED for memory-adaptive sort] original AsterixDB sort() had NO logging block;
+        // [ADDED for memory-adaptive sort] original AsterixDB sort() had NO logging block
         if (LOGGER.isInfoEnabled()) {
             long fillPct = (maxSortMemory > 0 && maxSortMemory != Long.MAX_VALUE)
                     ? (100L * totalMemoryUsed / maxSortMemory) : -1;
-            LOGGER.warn("adaptive-sort-run: framesLoaded={} bytesUsed={} budgetBytes={} fillPct={} tuples={}",
-                    getFrameCount(), totalMemoryUsed, maxSortMemory, fillPct, tupleCount);
+            LOGGER.warn(
+                    "adaptive-sort-run: framesLoaded={} bytesUsed={} budgetBytes={} fillPct={} tuples={} "
+                            + "mergeFanIn={} bucketTargetBytes={}",
+                    getFrameCount(), totalMemoryUsed, maxSortMemory, fillPct, tupleCount, mergeFanIn,
+                    bucketTargetBytes);
         }
-
         // ORIGINAL sort(): build ONE tPointers array over ALL frames, then sort the whole thing in one pass.
-
         // Now, pointers are built incrementally in insertFrame and full buckets are already sorted.
         // Here we just seal the last bucket and merge the buckets.
 
-
-        //
-        //   if (tPointers == null || tPointers.length < tupleCount * ptrSize) {
-        //       tPointers = new int[tupleCount * ptrSize];
-        //   }
-        //   int ptr = 0;
-        //   for (int i = 0; i < bufferManager.getNumFrames(); ++i) {
-        //       bufferManager.getFrame(i, info);
-        //       inputTupleAccessor.reset(info.getBuffer(), info.getStartOffset(), info.getLength());
-        //       int tCount = inputTupleAccessor.getTupleCount();
-        //       byte[] array = inputTupleAccessor.getBuffer().array();
-        //       int fieldSlotsLength = inputTupleAccessor.getFieldSlotsLength();
-        //       for (int j = 0; j < tCount; ++j, ++ptr) {
-        //           int tStart = inputTupleAccessor.getTupleStartOffset(j);
-        //           int tEnd = inputTupleAccessor.getTupleEndOffset(j);
-        //           tPointers[ptr * ptrSize + ID_FRAME_ID] = i;
-        //           tPointers[ptr * ptrSize + ID_TUPLE_START] = tStart;
-        //           tPointers[ptr * ptrSize + ID_TUPLE_END] = tEnd;
-        //           if (nkcs == null) { continue; }
-        //           int keyPos = ptr * ptrSize + ID_NORMALIZED_KEY;
-        //           for (int k = 0; k < nkcs.length; k++) {
-        //               int sortField = sortFields[k];
-        //               int fieldStartOffsetRel = inputTupleAccessor.getFieldStartOffset(j, sortField);
-        //               int fieldEndOffsetRel = inputTupleAccessor.getFieldEndOffset(j, sortField);
-        //               int fieldStartOffset = fieldStartOffsetRel + tStart + fieldSlotsLength;
-        //               nkcs[k].normalize(array, fieldStartOffset, fieldEndOffsetRel - fieldStartOffsetRel,
-        //                       tPointers, keyPos);
-        //               keyPos += normalizedKeyLength[k];
-        //           }
-        //       }
-        //   }
-        //   if (tupleCount > 0) { sortTupleReferences(); }
-        //
-
-        // Seal the final (partial) bucket, then stably merge all sorted buckets.
         sealBucket();
         if (numBuckets > 1) {
             mergeBuckets();
         }
     }
 
-    // [Stage 1] Build this frame's tuple pointers (frameId, start, end, normalized keys) and append
+    // [Stage 1] Build this frame's tuple pointers (frameIndex, start, end, normalized keys) and append
     // them to tPointers at [builtTuples, builtTuples + tCount). Extracted from the original sort() loop
     // so it can run per-frame as data arrives, rather than once over all frames at flush.
     private void buildFramePointers(int frameIndex) throws HyracksDataException {
@@ -317,21 +283,96 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         int len = builtTuples - currentBucketStart;
         if (len > 0) {
             sortBucketSlice(currentBucketStart, len);
-            appendBucketEnd(builtTuples);
+            // [Stage 3] a freshly sorted bucket is a level-0 run. Then, while the mergeFanIn newest runs are
+            // all the same size, merge them into one run of the next level up
+            pushRun(builtTuples, 0);
+            while (numBuckets >= mergeFanIn && topRunsShareLevel(mergeFanIn)) {
+                mergeTopRuns(mergeFanIn);
+            }
             currentBucketStart = builtTuples;
+            sortedFrameCount = getFrameCount(); // every frame so far is now in a sealed, sorted run
         }
         currentBucketBytes = 0;
     }
 
-    private void appendBucketEnd(int end) {
+    // [Stage 3] record a new sorted run: its end tuple index and its merge level (size).
+    private void pushRun(int end, int level) {
         if (bucketEnds == null) {
             bucketEnds = new int[16];
+            bucketLevels = new int[16];
         } else if (numBuckets >= bucketEnds.length) {
-            int[] grown = new int[bucketEnds.length * 2];
-            System.arraycopy(bucketEnds, 0, grown, 0, numBuckets);
-            bucketEnds = grown;
+            int[] grownEnds = new int[bucketEnds.length * 2];
+            int[] grownLevels = new int[bucketLevels.length * 2];
+            System.arraycopy(bucketEnds, 0, grownEnds, 0, numBuckets);
+            System.arraycopy(bucketLevels, 0, grownLevels, 0, numBuckets);
+            bucketEnds = grownEnds;
+            bucketLevels = grownLevels;
         }
-        bucketEnds[numBuckets++] = end;
+        bucketEnds[numBuckets] = end;
+        bucketLevels[numBuckets] = level;
+        numBuckets++;
+    }
+
+    // [Stage 3] Do the `count` newest runs all sit at the same merge level? (cascade trigger)
+    private boolean topRunsShareLevel(int count) {
+        int level = bucketLevels[numBuckets - 1];
+        for (int i = numBuckets - count; i < numBuckets - 1; i++) {
+            if (bucketLevels[i] != level) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // [Stage 3] Merge the `count` newest (adjacent) sorted runs into a single sorted run, in place in
+    // tPointers, via balanced pairwise passes ping-ponging with tScratch. STABLE. Collapses the count run
+    // entries into one whose level is one higher. count == numBuckets merges everything sealed so far.
+    private void mergeTopRuns(int count) throws HyracksDataException {
+        int first = numBuckets - count;
+        int lo = first > 0 ? bucketEnds[first - 1] : 0;
+        int hi = bucketEnds[numBuckets - 1];
+        ensureScratchCapacity(hi);
+        int[] ends = new int[count];
+        System.arraycopy(bucketEnds, first, ends, 0, count);
+        int runCount = count;
+        int[] src = tPointers;
+        int[] dst = tScratch;
+        boolean inScratch = false;
+        while (runCount > 1) {
+            int[] newEnds = new int[(runCount + 1) >> 1];
+            int w = 0;
+            int start = lo;
+            int r = 0;
+            while (r < runCount) {
+                int mid = ends[r];
+                if (r + 1 < runCount) {
+                    int end = ends[r + 1];
+                    mergeRange(src, dst, start, mid, end);
+                    newEnds[w++] = end;
+                    start = end;
+                    r += 2;
+                } else {
+                    // odd run left over: copy it verbatim so the ref-swap below keeps it
+                    System.arraycopy(src, start * ptrSize, dst, start * ptrSize, (mid - start) * ptrSize);
+                    newEnds[w++] = mid;
+                    start = mid;
+                    r += 1;
+                }
+            }
+            int[] t = src;
+            src = dst;
+            dst = t;
+            ends = newEnds;
+            runCount = w;
+            inScratch = !inScratch;
+        }
+        if (inScratch) {
+            // the merged result ended up in tScratch; copy just this group's span back to tPointers
+            System.arraycopy(src, lo * ptrSize, tPointers, lo * ptrSize, (hi - lo) * ptrSize);
+        }
+        bucketEnds[first] = hi; // the merged run now spans [lo, hi)
+        bucketLevels[first]++;
+        numBuckets = first + 1;
     }
 
     // [Stage 1] Slice-safe, STABLE bottom-up merge sort of tPointers[offset, offset+length), using
@@ -366,44 +407,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     // [Stage 1] Stably merge the sorted buckets (runs delimited by bucketEnds) into a fully sorted
     // tPointers[0, tupleCount), via balanced pairwise passes. Called only when numBuckets > 1.
     private void mergeBuckets() throws HyracksDataException {
-        ensureScratchCapacity(tupleCount);
-        int[] ends = new int[numBuckets];
-        System.arraycopy(bucketEnds, 0, ends, 0, numBuckets);
-        int runCount = numBuckets;
-        int[] src = tPointers;
-        int[] dst = tScratch;
-        boolean inScratch = false;
-        while (runCount > 1) {
-            int[] newEnds = new int[(runCount + 1) >> 1];
-            int w = 0;
-            int start = 0;
-            int r = 0;
-            while (r < runCount) {
-                int mid = ends[r];
-                if (r + 1 < runCount) {
-                    int hi = ends[r + 1];
-                    mergeRange(src, dst, start, mid, hi);
-                    newEnds[w++] = hi;
-                    start = hi;
-                    r += 2;
-                } else {
-                    // odd run left over: copy it verbatim so the ref-swap keeps it
-                    System.arraycopy(src, start * ptrSize, dst, start * ptrSize, (mid - start) * ptrSize);
-                    newEnds[w++] = mid;
-                    start = mid;
-                    r += 1;
-                }
-            }
-            int[] t = src;
-            src = dst;
-            dst = t;
-            ends = newEnds;
-            runCount = w;
-            inScratch = !inScratch;
-        }
-        if (inScratch) {
-            System.arraycopy(src, 0, tPointers, 0, tupleCount * ptrSize);
-        }
+        mergeTopRuns(numBuckets);
     }
 
     // [Stage 1] Merge two adjacent sorted runs src[lo,mid) and src[mid,hi) into dst[lo,hi). STABLE:
@@ -470,9 +474,15 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
 
     @Override
     public int flush(IFrameWriter writer) throws HyracksDataException {
+        // flush the whole sorted run (respecting a top-K output limit, if any)
+        return flushTuples(writer, Math.min(tupleCount, outputLimit));
+    }
+
+    // [Stage 2] Write out the first `limit` tuples of tPointers, in sorted order. flush() sends all of
+    // them; a partial spill (spillSortedKeepUnsorted) sends only the already-sorted prefix.
+    private int flushTuples(IFrameWriter writer, int limit) throws HyracksDataException {
         outputAppender.reset(outputFrame, true);
         int maxFrameSize = outputFrame.getFrameSize();
-        int limit = Math.min(tupleCount, outputLimit);
         int io = 0;
         for (int ptr = 0; ptr < limit; ++ptr) {
             int i = tPointers[ptr * ptrSize + ID_FRAME_ID];
@@ -493,6 +503,40 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
                     "Flushed records:" + limit + " out of " + tupleCount + "; Flushed through " + (io + 1) + " frames");
         }
         return maxFrameSize;
+    }
+
+    // [Stage 2] Give memory back on a victim without redoing work: spill only the already-sorted buckets
+    // as a run and keep the still-unsorted tail (the current, unsealed bucket) in memory. Returns false
+    // if nothing has been sealed/sorted yet, so the caller can just spill everything instead.
+
+
+    // IMPORTANT: just do sorter.sort(). no need for all this. For 256kb... why?
+
+    @Override
+    public boolean spillSortedKeepUnsorted(IFrameWriter writer) throws HyracksDataException {
+        if (numBuckets == 0) {
+            return false;
+        }
+        // 1. Merge the sealed buckets into one sorted run, then write it out.
+        if (numBuckets > 1) {
+            mergeBuckets();
+        }
+        flushTuples(writer, currentBucketStart);
+        int firstTailFrame = sortedFrameCount;
+        int frameCount = getFrameCount();
+        ByteBuffer[] tail = new ByteBuffer[frameCount - firstTailFrame];
+        for (int i = firstTailFrame; i < frameCount; i++) {
+            bufferManager.getFrame(i, info);
+            int len = info.getLength();
+            ByteBuffer copy = ByteBuffer.allocate(len);
+            System.arraycopy(info.getBuffer().array(), info.getStartOffset(), copy.array(), 0, len);
+            tail[i - firstTailFrame] = copy;
+        }
+        reset();
+        for (ByteBuffer f : tail) {
+            insertFrame(f);
+        }
+        return true;
     }
 
     protected final int compare(int tp1, int tp2) throws HyracksDataException {
@@ -548,9 +592,11 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         // [Stage 1] release bucket scratch/state
         tScratch = null;
         bucketEnds = null;
+        bucketLevels = null;
         builtTuples = 0;
         numBuckets = 0;
         currentBucketStart = 0;
         currentBucketBytes = 0;
+        sortedFrameCount = 0;
     }
 }

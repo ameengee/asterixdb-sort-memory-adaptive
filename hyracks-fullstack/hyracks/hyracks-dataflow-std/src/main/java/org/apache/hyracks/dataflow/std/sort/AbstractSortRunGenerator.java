@@ -81,6 +81,28 @@ public abstract class AbstractSortRunGenerator implements IRunGenerator {
         sorter.reset();
     }
 
+    // [Stage 2] Victim response: spill only the already-sorted part to a run and keep the unsorted tail in
+    // memory. Falls back to a normal full flush if there's nothing sorted to spill yet.
+    void spillSortedKeepUnsortedToRun() throws HyracksDataException {
+        IFrameSorter sorter = (IFrameSorter) getSorter();
+        if (sorter.getSortedTupleCount() == 0) {
+            flushFramesToRun();
+            return;
+        }
+        RunFileWriter runWriter = getRunFileWriter();
+        IFrameWriter flushWriter = getFlushableFrameWriter(runWriter);
+        flushWriter.open();
+        try {
+            sorter.spillSortedKeepUnsorted(flushWriter);
+        } catch (Exception e) {
+            flushWriter.fail();
+            throw e;
+        } finally {
+            flushWriter.close();
+        }
+        generatedRunFileReaders.add(runWriter.createDeleteOnCloseReader());
+    }
+
     @Override
     public void fail() throws HyracksDataException {
     }

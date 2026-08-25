@@ -84,8 +84,6 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
         adaptiveMaxFrames = maxSortFrames * ADAPT_CAP_MULTIPLIER;
 
         IFrameFreeSlotPolicy freeSlotPolicy = FrameFreeSlotPolicyFactory.createFreeSlotPolicy(policy, maxSortFrames);
-        //   IFrameBufferManager bufferManager = new VariableFrameMemoryManager(
-        //           new VariableFramePool(ctx, maxSortFrames * ctx.getInitialFrameSize()), freeSlotPolicy);
         AdaptiveVariableFrameMemoryManager bufferManager = new AdaptiveVariableFrameMemoryManager(
                 new VariableFramePool(ctx, adaptiveMaxFrames * ctx.getInitialFrameSize()), freeSlotPolicy,
                 new RandomMemoryBroker(VICTIM_PROBABILITY, 0));
@@ -99,21 +97,8 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
         }
     }
 
-    // ============================================================================================
-    // ORIGINAL AsterixDB nextFrame:
-    //
-    //   @Override
-    //   public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-    //       if (!frameSorter.insertFrame(buffer)) {
-    //           flushFramesToRun();
-    //           if (!frameSorter.insertFrame(buffer)) {
-    //               throw new HyracksDataException("The given frame is too big to insert into the sorting memory.");
-    //           }
-    //       }
-    //   }
-    //
-    // ============================================================================================
-
+    // IMPORTANT: set spilled frames to null, need to allow GC to reclaim that memory. Cannot lie about reducing
+    // budget and call it a day.
     @Override
     public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
         // (1) Every N frames: send current status to broker and read victim flag. If victim, shrink budget
@@ -124,7 +109,8 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
                 int newFrames = clampFrames(currentSortFrames + (int) reclaim);
                 long newBudgetBytes = (long) newFrames * ctx.getInitialFrameSize();
                 if (frameSorter.getUsedMemory() > newBudgetBytes) {
-                    flushFramesToRun();
+                    // [Stage 2] give back memory the cheap way: spill the sorted part, keep the unsorted tail
+                    spillSortedKeepUnsortedToRun();
                     setBudget(newFrames, "victim-periodic-spill");
                 } else {
                     setBudget(newFrames, "victim-periodic-shrink");
@@ -138,7 +124,8 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
             if (delta > 0 && currentSortFrames < adaptiveMaxFrames) {
                 setBudget(currentSortFrames + (int) delta, "grant-grow");
             } else if (delta < 0) {
-                flushFramesToRun();
+                // [Stage 2] victim while full: spill the sorted part, keep the unsorted tail
+                spillSortedKeepUnsortedToRun();
                 setBudget(currentSortFrames + (int) delta, "victim-full");
             } else {
                 flushFramesToRun();

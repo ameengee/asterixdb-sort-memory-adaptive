@@ -1,3 +1,4 @@
+
 # Adaptive Sort Algorithm — Design Plan
 
 > **Status:** design/plan. No code yet. Companion to `sort_operator_deep_dive.md`
@@ -179,14 +180,22 @@ spreads it all across accumulation. One machine, four parts.
 
 ## 7. Staged build plan (de-risking order)
 
-1. **Incremental cache-sized bucket sort + merge-at-spill (single thread, no async).**
+1. **[DONE]** **Incremental cache-sized bucket sort + merge-at-spill (single thread, no async).**
    Sort each cache-sized bucket as it fills (on the operator thread); on flush/victim,
    k-way merge the sorted buckets into the run. Spreads the CPU spike, makes spilling
    cheaper, gives cache benefit. Biggest bang, lowest risk. *No threads, no async.*
-2. **Shrink primitive (4.4).** Spill-largest-sorted-run + keep unsorted tail, wired to the
-   existing victim path in `nextFrame`.
-3. **Balanced progressive merge (4.3).** Add the geometric cascade so run count stays
-   bounded and a large run is always spill-ready. Start lazy/on-demand.
+   Landed in `AbstractFrameSorter` (buildFramePointers / sealBucket / sortBucketSlice /
+   mergeBuckets); verified exact-sorted across budgets.
+2. **[DONE]** **Shrink primitive (4.4).** Spill-largest-sorted-run + keep unsorted tail, wired to the
+   existing victim path in `nextFrame`. Landed as `spillSortedKeepUnsorted` +
+   `spillSortedKeepUnsortedToRun`; verified exact-sorted.
+3. **[DONE]** **Balanced progressive merge (4.3).** As each bucket seals it becomes a level-0 run;
+   whenever the two newest runs are the same size we merge them (a binary "merge-when-equal"
+   cascade, like LSM leveling). This keeps only ~log(#buckets) runs around, spreads the merge
+   work across accumulation, and makes victim spills cheaper (few runs left to merge). Chose
+   *eager* over the originally-suggested lazy: eager and lazy do the **same** total merge work
+   (both walk the same binary merge tree), so eager costs nothing extra and wins on victim
+   latency. Landed in `sealBucket` (the cascade) + `mergeTwoRuns`.
 4. **Cooperative overlap tuning (4.2).** Tune how much sort work per `nextFrame`; if the
    reader can be polled non-blocking, exploit true I/O overlap (open question 8.1).
 5. **Tune bucket size** and benchmark each mechanism independently (against a static-memory

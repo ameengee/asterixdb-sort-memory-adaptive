@@ -16,13 +16,49 @@ Runnable, copy-paste commands to launch the cluster, load data, run a spilling
 # cannot load it. /opt/homebrew/opt/openjdk is OpenJDK 26.
 export JAVA_HOME=/opt/homebrew/opt/openjdk
 
-# Cluster dir (the sample cluster's opt/local) and the SQL++ query endpoint.
+# Cluster dir (the sample cluster's opt/local), the assembly's jar folder, and the SQL++ endpoint.
 export CLUSTER=/Users/ameen/Codebase/asterixdb/asterixdb/asterix-server/target/asterix-server-0.9.10-SNAPSHOT-binary-assembly/apache-asterixdb-0.9.10-SNAPSHOT/opt/local
+export REPO=/Users/ameen/Codebase/asterixdb/asterixdb/asterix-server/target/asterix-server-0.9.10-SNAPSHOT-binary-assembly/apache-asterixdb-0.9.10-SNAPSHOT/repo
 export Q=http://127.0.0.1:19002/query/service
 
 # Sanity: should print "openjdk version 26.x"
 "$JAVA_HOME/bin/java" -version
 ```
+
+---
+
+## 0.5 Build & deploy a specific code version (e.g. after `git stash`)
+
+**Important:** git changes only your *source*. The running cluster loads a pre-built jar, so
+after any `git stash` / `git stash pop` / checkout you must **rebuild the jar and redeploy** or
+the demo still runs the old code. Comment-only edits don't need this; code edits do.
+
+To demo a particular version (for example, `git stash` to fall back to "Stage 1 + Random Broker"):
+
+```bash
+# 1. Switch source to the version you want to demo:
+cd /Users/ameen/Codebase/asterixdb
+git stash            # e.g. drop uncommitted Stage 2/3 -> back to committed Stage 1 + Random Broker
+#   ... run the demo ...   then later:  git stash pop    # bring the changes back
+
+# 2. Rebuild the one jar from the (now switched) source:
+cd /Users/ameen/Codebase/asterixdb/hyracks-fullstack
+mvn -o -pl hyracks/hyracks-dataflow-std package -DskipTests   # expect BUILD SUCCESS
+
+# 3. Restart the cluster with the fresh jar:
+( cd "$CLUSTER" && bin/stop-sample-cluster.sh )
+cp hyracks/hyracks-dataflow-std/target/hyracks-dataflow-std-0.3.10-SNAPSHOT.jar \
+   "$REPO/hyracks-dataflow-std-0.3.10-SNAPSHOT.jar"
+( cd "$CLUSTER" && bin/start-sample-cluster.sh )              # expect "Cluster ... ACTIVE"
+```
+
+The 300k-row dataset persists in LSM storage across the restart, so you don't need to reload it
+(§2 is only for a fresh instance). After redeploying, jump to §3 to run the query.
+
+> Reminder: rebuild + redeploy after **every** `git stash` / `git stash pop`. The demo *output*
+> (the `adaptive-sort:` log lines) looks the same across these versions — the "Stage 1 + Random
+> Broker" story is about the *code structure* you show in the editor; the logs demonstrate the
+> adaptive behavior.
 
 ---
 
