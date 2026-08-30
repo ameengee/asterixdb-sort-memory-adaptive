@@ -1,0 +1,7 @@
+# Example broker trace for ScriptedMemoryBroker.
+# callIndex counts ALL broker interactions for one operator, in order, starting at 1.
+# amount is a fraction of the operator's current budget.
+3,  reclaim, 0.5
+7,  grant,   1.0
+11, deny,    0
+15, reclaim, 0.25
