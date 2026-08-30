@@ -30,8 +30,8 @@ import org.apache.hyracks.dataflow.std.buffermanager.EnumFreeSlotPolicy;
 import org.apache.hyracks.dataflow.std.buffermanager.FrameFreeSlotPolicyFactory;
 import org.apache.hyracks.dataflow.std.buffermanager.IBrokerConduit;
 import org.apache.hyracks.dataflow.std.buffermanager.IFrameFreeSlotPolicy;
+import org.apache.hyracks.dataflow.std.buffermanager.MemoryBrokerFactory;
 import org.apache.hyracks.dataflow.std.buffermanager.MemoryStatus;
-import org.apache.hyracks.dataflow.std.buffermanager.RandomMemoryBroker;
 import org.apache.hyracks.dataflow.std.buffermanager.VariableFramePool;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -45,8 +45,14 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
     // [ADDED for memory-adaptive sort]
     private static final Logger ADAPT_LOGGER = LogManager.getLogger();
     private static final int ADAPT_CAP_MULTIPLIER = 4;
-    private static final double VICTIM_PROBABILITY = 0.3; // tunable: P(broker victimizes us)
-    private static final int VICTIM_CHECK_INTERVAL = 10; // poll the broker every N frames
+    // [Experiment harness] How often we poll the broker for a reclaim demand. Lower = the broker gets
+    // more chances to act, which matters when sweeping eviction frequency (E3/E4).
+    private static final int VICTIM_CHECK_INTERVAL =
+            Math.max(1, Integer.getInteger("hyracks.sort.victimCheckInterval", 10));
+    // [Experiment harness] Stage 2 on/off. When false, a victim spills the WHOLE batch the stock way
+    // (flushFramesToRun) instead of spilling only the sorted prefix -- the Stage-2-disabled arm.
+    private static final boolean PARTIAL_SPILL_ENABLED =
+            Boolean.parseBoolean(System.getProperty("hyracks.sort.partialSpill", "true"));
     private final IBrokerConduit broker; // == the adaptive buffer manager (relays status to the broker)
     private final int adaptiveMinFrames; // floor, kept safely above single-frame needs
     private final int adaptiveMaxFrames; // ceiling == pool capacity in frames
@@ -84,9 +90,11 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
         adaptiveMaxFrames = maxSortFrames * ADAPT_CAP_MULTIPLIER;
 
         IFrameFreeSlotPolicy freeSlotPolicy = FrameFreeSlotPolicyFactory.createFreeSlotPolicy(policy, maxSortFrames);
+        // [Experiment harness] The broker policy is chosen at runtime (system properties) so one jar
+        // covers every experimental arm; see MemoryBrokerFactory. Default stays the random shell.
         AdaptiveVariableFrameMemoryManager bufferManager = new AdaptiveVariableFrameMemoryManager(
                 new VariableFramePool(ctx, adaptiveMaxFrames * ctx.getInitialFrameSize()), freeSlotPolicy,
-                new RandomMemoryBroker(VICTIM_PROBABILITY, 0));
+                MemoryBrokerFactory.create());
         this.broker = bufferManager;
         if (alg == Algorithm.MERGE_SORT) {
             frameSorter = new FrameSorterMergeSort(ctx, bufferManager, maxSortFrames, sortFields,
@@ -110,7 +118,7 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
                 long newBudgetBytes = (long) newFrames * ctx.getInitialFrameSize();
                 if (frameSorter.getUsedMemory() > newBudgetBytes) {
                     // [Stage 2] give back memory the cheap way: spill the sorted part, keep the unsorted tail
-                    spillSortedKeepUnsortedToRun();
+                    spillOnVictim();
                     setBudget(newFrames, "victim-periodic-spill");
                 } else {
                     setBudget(newFrames, "victim-periodic-shrink");
@@ -125,7 +133,7 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
                 setBudget(currentSortFrames + (int) delta, "grant-grow");
             } else if (delta < 0) {
                 // [Stage 2] victim while full: spill the sorted part, keep the unsorted tail
-                spillSortedKeepUnsortedToRun();
+                spillOnVictim();
                 setBudget(currentSortFrames + (int) delta, "victim-full");
             } else {
                 flushFramesToRun();
@@ -134,6 +142,16 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
             if (!frameSorter.insertFrame(buffer)) {
                 throw new HyracksDataException("The given frame is too big to insert into the sorting memory.");
             }
+        }
+    }
+
+    // [Experiment harness] Victim response, honoring the Stage 2 toggle: partial spill (keep the
+    // unsorted tail) when enabled, otherwise the stock full flush.
+    private void spillOnVictim() throws HyracksDataException {
+        if (PARTIAL_SPILL_ENABLED) {
+            spillSortedKeepUnsortedToRun();
+        } else {
+            flushFramesToRun();
         }
     }
 

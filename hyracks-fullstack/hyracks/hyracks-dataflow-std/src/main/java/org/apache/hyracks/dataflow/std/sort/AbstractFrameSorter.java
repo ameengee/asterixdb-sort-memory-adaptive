@@ -78,7 +78,12 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     protected int tupleCount;
 
     // [ADDED] Incremental cache-sized bucket sort. builds each frame's pointers as they arrive.
-    private static final long BUCKET_TARGET_BYTES = 256L * 1024; // ~L2 cache; tunable
+    // [Experiment harness] Cache-sized bucket target. Override without a rebuild via
+    // -Dhyracks.sort.bucketTargetBytes=N on the NC JVM. Two notable settings:
+    //   262144 (default)  ~L2; the incremental bucket sort as designed
+    //   a huge value      no bucket ever seals during accumulation, so sort() does ONE big sort at
+    //                     flush -- i.e. Stage 1 disabled, the stock-sorter baseline in-build.
+    private static final long BUCKET_TARGET_BYTES = Long.getLong("hyracks.sort.bucketTargetBytes", 256L * 1024);
     private long bucketTargetBytes = BUCKET_TARGET_BYTES;
     private long currentBucketBytes; // data bytes accumulated in the current, unsealed bucket
     private int builtTuples; // # tuples whose pointers are already built into tPointers
@@ -508,7 +513,6 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     // [Stage 2] Give memory back on a victim without redoing work: spill only the already-sorted buckets
     // as a run and keep the still-unsorted tail (the current, unsealed bucket) in memory. Returns false
     // if nothing has been sealed/sorted yet, so the caller can just spill everything instead.
-
 
     // IMPORTANT: just do sorter.sort(). no need for all this. For 256kb... why?
 
