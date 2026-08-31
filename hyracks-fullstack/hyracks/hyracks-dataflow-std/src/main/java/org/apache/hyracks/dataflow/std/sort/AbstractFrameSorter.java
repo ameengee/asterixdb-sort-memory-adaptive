@@ -370,11 +370,13 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
             long spreadPct = runSpan > 0 ? (100L * span / runSpan) : 0;
             long residual = runSpan - (phGapNs + phInsertNs + phSortCallNs);
             LOGGER.warn(
-                    "adaptive-sort-phase: run={} loadNs={} sortNs={} cascadeNs={} mergeNs={} sortEvents={} "
+                    "adaptive-sort-phase: run={} loadNs={} sortNs={} cascadeNs={} mergeNs={} "
+                            + "sortCallNs={} flushNs={} residualNs={} moves={} compares={} sortEvents={} "
                             + "firstSortAtNs={} lastSortAtNs={} runSpanNs={} spreadPct={} insertNs={} "
-                            + "gapNs={} tuples={} frames={}",
-                    phRunSeq, phLoadNs, phSortNs, phCascadeNs, phMergeNs, phSortEvents, phFirstSortAtNs, phLastSortAtNs,
-                    runSpan, spreadPct, phInsertNs, phGapNs, tupleCount, getFrameCount());
+                            + "gapNs={} tuples={} frames={} bucketBytes={} fanIn={} kway={}",
+                    phRunSeq, phLoadNs, phSortNs, phCascadeNs, phMergeNs, phSortCallNs, phFlushNs, residual, phMoves,
+                    phCompares, phSortEvents, phFirstSortAtNs, phLastSortAtNs, runSpan, spreadPct, phInsertNs, phGapNs,
+                    tupleCount, getFrameCount(), bucketTargetBytes, mergeFanIn, KWAY_MERGE);
         }
     }
 
