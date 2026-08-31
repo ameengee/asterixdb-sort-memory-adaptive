@@ -27,7 +27,7 @@ fi
 BROKER=random; PERIOD=10; ACTION=reclaim; FRACTION=0.5
 VICTIM_PROB=0.3; SEED=0; DISTRIBUTION=normal; MEAN=0.5; STDDEV=0.15; DF=5
 SCRIPT_PATH=""; BUCKET_BYTES=262144; MERGE_FAN_IN=2; PARTIAL_SPILL=true
-VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""
+VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -49,6 +49,8 @@ while [[ $# -gt 0 ]]; do
     --heap) HEAP="$2"; shift 2;;
     --no-build) BUILD=0; shift;;
     --jar) JAR_OVERRIDE="$2"; BUILD=0; shift 2;;
+    --phase-log) PHASE_LOG="$2"; shift 2;;
+    --kway) KWAY="$2"; shift 2;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done
@@ -69,6 +71,8 @@ JVM_ARGS="$JVM_ARGS -Dhyracks.sort.bucketTargetBytes=$BUCKET_BYTES"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.mergeFanIn=$MERGE_FAN_IN"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.partialSpill=$PARTIAL_SPILL"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.victimCheckInterval=$VICTIM_INTERVAL"
+JVM_ARGS="$JVM_ARGS -Dhyracks.sort.phaseLog=$PHASE_LOG"
+JVM_ARGS="$JVM_ARGS -Dhyracks.sort.kwayMerge=$KWAY"
 
 echo "[deploy] jvm.args = $JVM_ARGS"
 
@@ -100,6 +104,15 @@ s = re.sub(r'(?m)^(\[nc\]\n(?:[^\[]*?))(\n\[)', r'\1jvm.args=' + jvm.replace('\\
 open(conf, 'w').write(s)
 PY
 grep -A 5 '^\[nc\]$' "$CONF" | head -6
+
+if [[ -n "$JAR_OVERRIDE" ]]; then
+  WANT=$(md5sum "$JAR_OVERRIDE" | cut -d" " -f1)
+  GOT=$(md5sum "$JARREPO/hyracks-dataflow-std-0.3.10-SNAPSHOT.jar" | cut -d" " -f1)
+  if [[ "$WANT" != "$GOT" ]]; then
+    echo "[deploy] ERROR: deployed jar md5 $GOT != requested $WANT" >&2; exit 1
+  fi
+  echo "[deploy] jar verified: md5 $GOT"
+fi
 
 echo "[deploy] starting cluster..."
 ( cd "$CLUSTER" && bin/start-sample-cluster.sh 2>&1 | tail -1 )
