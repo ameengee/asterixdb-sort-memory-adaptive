@@ -12,10 +12,9 @@ covers every arm; the configuration is JVM system properties, so no rebuild betw
 | `scrape_sort_logs.py` | Turn NC log lines into `decisions` / `runs` / `broker` CSVs |
 | `broker_script_example.csv` | Example trace for the scripted broker |
 | `load_data.py` | Load synthetic (multi-key-type) or TPC-H lineitem datasets |
-| `sample_pressure.py` | Sample NC CPU / disk / RSS over time |
-| `profile_query.py` | Profile ONE query at high frequency -- the sawtooth figure |
+| `make_figures.py` | Build the paper figures from the sorter's phase traces |
 | `run_e1.sh` | Run the E1 no-harm comparison with alternating arms |
-| `analyze_e1.py` | Summarize E1 latency + pressure |
+| `analyze_e1.py` | Summarize E1 query latency |
 
 ## Why `deploy.sh` exists
 
@@ -122,32 +121,28 @@ Local numbers are for wiring validation only — real measurements belong on the
 described in `../paper_experiment_plan.md` section 6.
 
 
-## Measuring resource *shape* (the sawtooth)
+## Measuring resource shape (I/O vs CPU over time)
 
-The claim behind Stage 1 is not only "as fast as stock" but "spreads the work differently":
+Use the sorter's OWN phase counters. Do not use a CPU sampler for this:
 
-* **stock** accumulates frames (disk busy, CPU idle), then sorts the whole batch at once
-  (CPU spike, disk idle), then writes the run -- an interlocking sawtooth, repeated per run.
-* **adaptive** sorts each cache-sized bucket as it fills, so CPU work overlaps arrival.
-
-Two tools:
+> During the load phase the operator thread is running `System.arraycopy`, so it reads as ~100%
+> busy whether or not any sorting is happening. Process-level and per-thread CPU both show WHICH
+> thread is active, not WHICH KIND of work it is doing. Marginal statistics (mean / max / cv) are
+> worse still -- they discard time ordering, and phase alternation is purely temporal. Earlier
+> sampler-based tools concluded "no interleaving effect"; the phase counters showed 325 sort
+> events at 84% spread versus 1 event at 0%. Those tools have been deleted.
 
 ```bash
-# (a) whole-run pressure, sampled alongside a workload
-./sample_pressure.py --label myrun --duration 300 --interval 0.1
-
-# (b) ONE query at high resolution -- the actual figure. Use a LOW sort memory so the sort
-#     spills repeatedly and the pattern repeats visibly.
-./profile_query.py --label stock-profile    --sort-memory 1MB --interval 0.02
-./profile_query.py --label adaptive-profile --sort-memory 1MB --interval 0.02
+# one binary, two arms: bucketTargetBytes huge reproduces stock's load-then-sort path
+./deploy.sh --jar <jar> --broker none --bucket-bytes 262144      --phase-log true
+./deploy.sh --jar <jar> --broker none --bucket-bytes 999999999999 --phase-log true
+# ... run a query, then scrape the adaptive-sort-series lines and plot:
+./make_figures.py        # -> figures/fig1_io_cpu.{pdf,png}, figures/fig2_memory.{pdf,png}
 ```
 
-`profile_query.py` prints an ASCII CPU-shape plot so the pattern is readable without plotting,
-and writes a CSV with a `phase` column (idle / query) for real plots.
-
-**Per-process disk counters are Linux-only.** On macOS the samplers fall back to system-wide
-counters and label the mode in the CSV (`ioMode`), so a local reading is never silently mistaken
-for a per-process one. Real I/O numbers should come from the Linux AWS instance.
+**Splitting traces by partition matters.** Both partitions log `run=0`, so concatenating
+`nc-*.log` interleaves two traces into a sawtooth that looks like real structure but is an
+artifact. `make_figures.py` splits segments on a `tRelMs` reset and plots ONE partition per line.
 
 ## Comparing against stock
 

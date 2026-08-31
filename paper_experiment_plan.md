@@ -261,3 +261,100 @@ needs `profile_query.py` against a dataset large enough for multi-second queries
 
 **Caveats:** local laptop (thermal drift, no CPU pinning), 300k rows, short queries, macOS
 system-wide disk counters. Treat as pipeline validation, not a paper result.
+
+### Sort-operator phase behavior -- 2026-08-30, EC2 c6gd.2xlarge, 10M rows, 512MB sort memory
+Measured with in-sorter instrumentation (`-Dhyracks.sort.phaseLog=true`), same binary both sides;
+`bucketTargetBytes` huge reproduces stock's load-then-sort path.
+
+| | load-then-sort (bucketing off) | interleaved (bucketing on) |
+| :-- | --: | --: |
+| sortEvents | 1 | 325 |
+| spreadPct  | 0 | 85-86 |
+| sortNs     | 16.12s | 7.76s |
+| mergeNs    | 0 | 2.97s |
+
+Consistent across all runs of repeated queries. **This is the interleaving result**: stock performs a
+single monolithic sort at flush; the bucketed sorter performs 325 sorts spread across 86% of the
+run's lifetime. In-sorter CPU also drops 33% (16.12s -> 10.73s sort+merge).
+
+**Why a CPU sampler cannot show this** (and an earlier analysis of ours wrongly concluded "no
+effect"): during the load phase the operator thread is running `System.arraycopy`, so it reads as
+~100% busy in BOTH designs. Process-level CPU shows which thread is active, not which kind of work.
+Marginal statistics (mean/max/cv) are worse still -- they discard time ordering entirely, and a
+sawtooth is purely a temporal structure.
+
+**Open paradox worth chasing:** bucketing reduces in-sorter CPU by 33% yet the end-to-end query is
+~8% SLOWER at 512MB (20.11s vs 18.59s stock). The extra time is therefore NOT in the sorter's own
+sort/merge work. Locate it before optimizing -- two hypothesis-driven optimizations were attempted
+and both were wrong:
+  - cascade copy-back: refuted (the fan-in sweep that appeared to support it was invalid, see below)
+  - per-bucket copy-back: an in-place insertion-sort variant measured 3.6% SLOWER (20.84s vs 20.11s)
+    because insertion sort shifts ptrSize-wide slots, moving ~5-7x more data than the merge passes
+    it replaced.
+
+### Invalidated experiment -- fan-in sweep, 2026-08-30
+A 512MB fan-in sweep (2/8/32/no-cascade) was VOID: `MERGE_FAN_IN` was a hardcoded constant at the
+time, so `-Dhyracks.sort.mergeFanIn` was ignored and every arm ran fan-in 2. All 3876 log lines
+echoed `mergeFanIn=2`. Caught only because the run log echoes its own configuration -- keep that
+echo, and check it before trusting any sweep.
+
+### Corrected accounting -- 2026-08-31 (supersedes the "33% less CPU" claim above)
+The cascade merges called from `sealBucket` were NOT instrumented. Counting them changes the
+conclusion. Per partition, 5.0M tuples, 512MB sort memory:
+
+| stage | bucketed | load-then-sort |
+| :-- | --: | --: |
+| bucket sorts | 6.20s | - |
+| **cascade merges** | **6.28s** | 0 |
+| final merge | 2.69s | 0 |
+| single monolithic sort | - | 13.99s |
+| **total sort work** | **15.16s** | **13.99s** |
+| blocked on upstream (gapNs) | 3.97s | 4.02s |
+
+**Total sorting work is roughly EQUAL.** Bucketing does not reduce comparison work; it restructures
+one big sort into many small sorts plus a merge cascade plus a final merge. The earlier "33% less"
+figure counted only `sortBucketSlice`.
+
+**Merge work is conserved.** Raising the cascade fan-in moves time out of the cascade and into the
+final merge almost one-for-one, and query time does not improve:
+
+| fanIn | cascade | final merge | merge total | query |
+| :-- | --: | --: | --: | --: |
+| 2 | 6.24s | 2.91s | 9.15s | 22.02s |
+| 8 | 4.52s | 6.03s | 10.55s | 22.62s |
+| 32 | 3.42s | 5.41s | 8.83s | 21.35s |
+| none | 0.00s | 8.96s | 8.96s | 22.17s |
+
+**How much slower:** ~8-9% at 512MB; indistinguishable at 8MB. The gap grows with sort memory,
+i.e. with bucket count. It is NOT upstream starvation (gapNs is identical) and NOT the external
+merge (time outside the sorter is small). It is the overhead of the extra structure.
+
+**What survives for the paper:** the interleaving result (325 sort events at 84% spread vs 1 at 0%)
+and lower time-averaged memory occupancy (117MB vs 171MB, **32% lower**) -- see
+`experiments/figures/`. Drop any "less CPU" claim.
+
+### Two failed optimizations (do not retry without measuring)
+1. **Cascade copy-back**: hypothesized as the cost; refuted -- fan-in has no effect on query time.
+2. **Per-bucket copy-back**: replacing the copy-back with in-place insertion runs + even-parity
+   merging measured 3.6% SLOWER (20.84s vs 20.11s). Insertion sort shifts `ptrSize`-wide slots,
+   moving ~5-7x more data than the merge passes it replaced.
+
+### Fan-in is a free knob (figure: `experiments/figures/fig3_fanin`)
+Query time is flat across cascade fan-in 2 / 4 / 8 / 32 / none. Spread between settings is 0.65s
+while spread *within* a single setting reaches 1.81s -- the settings are indistinguishable. Merge
+work is conserved: raising fan-in moves seconds out of the cascade and into the final merge almost
+one-for-one (6.24 -> 0.00 cascade, 2.91 -> 8.96 final; total stays ~9s).
+
+**Why this matters:** because fan-in costs nothing in throughput, it can be chosen entirely for
+adaptivity behaviour rather than for speed.
+
+- **Small fan-in (eager, 2)** merges aggressively during arrival, so only ~log2(buckets) runs are
+  outstanding and a large already-sorted run is nearly always available to spill. That should make
+  victim response cheap -- the shrink primitive has little left to merge before it can give memory
+  back.
+- **Large fan-in (lazy)** leaves more unmerged runs outstanding, so a victim spill must do more
+  merging first, but it performs fewer cascade events during normal operation.
+
+**Status: the adaptivity half is REASONED, NOT MEASURED.** We have measured only that fan-in does
+not affect query time. Victim-response latency as a function of fan-in is experiment E3 and has not
+been run. Do not state the adaptivity tradeoff as a result until it is.

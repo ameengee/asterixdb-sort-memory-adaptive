@@ -77,6 +77,56 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     protected final int[] tmpPointer;
     protected int tupleCount;
 
+    // ============================================================================================
+    // [Phase instrumentation] Ground truth for "does the sort operator interleave sort work with
+    // data arrival, or load everything and then sort?"
+    //
+    // A CPU sampler cannot answer this: during the load phase the operator thread is running
+    // System.arraycopy, so it reads as ~100% busy either way. What distinguishes the two is WHEN
+    // comparison work happens, which only the sorter itself knows.
+    //
+    // Enable with -Dhyracks.sort.phaseLog=true. OFF by default: the nanoTime calls are cheap but
+    // must not perturb timing runs. Emits one line per run:
+    //   adaptive-sort-phase: loadNs=.. sortNs=.. cascadeNs=.. mergeNs=.. sortEvents=..
+    //                        firstSortAtNs=.. lastSortAtNs=.. spanNs=..
+    // firstSortAt/lastSortAt are relative to the first frame of the run, so their spread over the
+    // run's lifetime IS the interleaving measure: load-then-sort collapses both to the very end.
+    private static final boolean PHASE_LOG = Boolean.getBoolean("hyracks.sort.phaseLog");
+    private long phLoadNs;
+    private long phSortNs;
+    private long phMergeNs;
+    private int phSortEvents;
+    private long phRunStartNs;
+    private long phFirstSortAtNs;
+    private long phLastSortAtNs;
+    // Critical-path decomposition. insertFrame is called from the operator's nextFrame, so the GAP
+    // between one insertFrame returning and the next starting is time the operator was NOT in the
+    // sorter -- overwhelmingly, blocking for the upstream to hand over the next frame.
+    //   phInsertNs high + phGapNs low  -> the sorter is the bottleneck; sort work is on the critical
+    //                                     path and delays consumption (upstream backs up).
+    //   phInsertNs low  + phGapNs high -> upstream is the bottleneck and sort work rides for free.
+    // This is what distinguishes "interleaving overlaps with arrival" from "interleaving merely
+    // postpones consumption".
+    private long phCascadeNs; // cascade merges run from sealBucket -- previously UNCOUNTED
+    private long phInsertNs;
+    private long phGapNs;
+    private long phLastInsertEndNs;
+    // Periodic time series for plotting memory use and cumulative sort work against time.
+    private static final long PHASE_SAMPLE_NS = 100L * 1000 * 1000; // 100ms
+    private long phLastSampleNs;
+    private int phRunSeq;
+    // OPERATION COUNTS. Counts are noise-free, unlike timings: a 24% run-to-run timing spread does
+    // not blur them at all. They separate "does more work" from "does the same work more slowly":
+    //   same compares + more moves  -> data movement is the cost (pointer traffic)
+    //   same compares + same moves  -> the memory system is the cost (cache/TLB), not the algorithm
+    // A balanced pairwise merge of k runs costs N*log2(k) moves; a k-way tournament merge costs the
+    // same comparisons but only N moves. These counters are what tells the two apart.
+    private long phMoves; // tuple-slot moves (each is ptrSize ints)
+    private long phCompares; // calls to compare()
+    // Coverage check: span must equal gap + insert + sortCall + residual. A large residual means a
+    // stage is UNINSTRUMENTED -- which is exactly how the cascade merge hid for so long.
+    private long phSortCallNs;
+    private long phFlushNs;
     // [ADDED] Incremental cache-sized bucket sort. builds each frame's pointers as they arrive.
     // [Experiment harness] Cache-sized bucket target. Override without a rebuild via
     // -Dhyracks.sort.bucketTargetBytes=N on the NC JVM. Two notable settings:
@@ -91,7 +141,18 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     private int[] bucketEnds; // end tuple index (exclusive) of each sorted run (a bucket, or merged buckets)
     private int numBuckets; // # sorted runs
     private int[] bucketLevels; // [Stage 3] each run's merge level. Used to merge runs in a cascade.
-    private static final int MERGE_FAN_IN = 2; // [Stage 3] Cascade fan-in: merge whenever this many newest runs share a level.
+    // [Stage 3] Cascade fan-in: merge whenever this many newest runs share a level. Spans the whole
+    // eager/lazy spectrum: 2 = eager binary cascade; a value above the bucket count never cascades,
+    // leaving one merge at the end.
+    //
+    // NOTE: this MUST read the system property. It was briefly a hardcoded 2, which silently voided
+    // a whole fan-in sweep on EC2 (2026-08-30) -- every arm ran fan-in 2 while the harness believed
+    // it was varying the knob. The value is echoed on the adaptive-sort-run log line so a run's
+    // configuration can always be confirmed from its own output rather than assumed.
+    private static final int MERGE_FAN_IN = Math.max(2, Integer.getInteger("hyracks.sort.mergeFanIn", 2));
+    // Use a one-pass k-way tournament merge instead of balanced pairwise passes when merging more
+    // than two runs. Off by default so it can be A/B'd: -Dhyracks.sort.kwayMerge=true
+    private static final boolean KWAY_MERGE = Boolean.getBoolean("hyracks.sort.kwayMerge");
     private int mergeFanIn = MERGE_FAN_IN;
     private int[] tScratch; // scratch buffer for the stable merges (bucket sort + bucket merge)
     // [Stage 2] frames [0, sortedFrameCount) belong to sealed (sorted) buckets; the rest are the unsorted tail
@@ -188,6 +249,24 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         this.currentBucketBytes = 0;
         this.numBuckets = 0;
         this.sortedFrameCount = 0;
+        // phase counters are per-run: clear them so each run reports its own timeline
+        this.phLoadNs = 0;
+        this.phSortNs = 0;
+        this.phMergeNs = 0;
+        this.phSortEvents = 0;
+        this.phRunStartNs = 0;
+        this.phFirstSortAtNs = 0;
+        this.phLastSortAtNs = 0;
+        this.phCascadeNs = 0;
+        this.phSortCallNs = 0;
+        this.phFlushNs = 0;
+        this.phMoves = 0;
+        this.phCompares = 0;
+        this.phInsertNs = 0;
+        this.phGapNs = 0;
+        this.phLastInsertEndNs = 0;
+        this.phLastSampleNs = 0;
+        this.phRunSeq++;
     }
 
     @Override
@@ -201,14 +280,42 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         // it -- so sort CPU overlaps input arrival instead of spiking all at once at flush time.
         if (totalMemoryUsed + requiredMemory <= maxSortMemory) {
             int inserted = inputTupleAccessor.getTupleCount(); // read before buildFramePointers repoints the accessor
+            long tEnter = PHASE_LOG ? System.nanoTime() : 0;
+            if (PHASE_LOG) {
+                if (phRunStartNs == 0) {
+                    phRunStartNs = tEnter;
+                    phLastSampleNs = tEnter;
+                } else if (phLastInsertEndNs != 0) {
+                    phGapNs += tEnter - phLastInsertEndNs; // time spent outside the sorter
+                }
+            }
             int frameIndex = bufferManager.insertFrame(inputBuffer);
             if (frameIndex >= 0) {
+                long t0 = PHASE_LOG ? System.nanoTime() : 0;
                 totalMemoryUsed += requiredMemory;
                 tupleCount += inserted;
                 buildFramePointers(frameIndex);
                 currentBucketBytes += inputBuffer.capacity();
+                if (PHASE_LOG) {
+                    phLoadNs += System.nanoTime() - t0;
+                }
                 if (currentBucketBytes >= bucketTargetBytes) {
                     sealBucket();
+                }
+                if (PHASE_LOG) {
+                    long tEnd = System.nanoTime();
+                    phInsertNs += tEnd - tEnter;
+                    phLastInsertEndNs = tEnd;
+                    if (tEnd - phLastSampleNs >= PHASE_SAMPLE_NS) {
+                        phLastSampleNs = tEnd;
+                        LOGGER.warn(
+                                "adaptive-sort-series: run={} tRelMs={} memUsed={} tuples={} frames={} "
+                                        + "buckets={} cumSortNs={} cumMergeNs={} cumLoadNs={} "
+                                        + "cumInsertNs={} cumGapNs={} cumCascadeNs={} sortEvents={}",
+                                phRunSeq, (tEnd - phRunStartNs) / 1000000L, totalMemoryUsed, tupleCount,
+                                getFrameCount(), numBuckets, phSortNs, phMergeNs, phLoadNs, phInsertNs, phGapNs,
+                                phCascadeNs, phSortEvents);
+                    }
                 }
                 return true;
             }
@@ -230,6 +337,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
 
     @Override
     public void sort() throws HyracksDataException {
+        long tSortCall0 = PHASE_LOG ? System.nanoTime() : 0;
         // [ADDED for memory-adaptive sort] original AsterixDB sort() had NO logging block
         if (LOGGER.isInfoEnabled()) {
             long fillPct = (maxSortMemory > 0 && maxSortMemory != Long.MAX_VALUE)
@@ -246,7 +354,27 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
 
         sealBucket();
         if (numBuckets > 1) {
+            long t0 = PHASE_LOG ? System.nanoTime() : 0;
             mergeBuckets();
+            if (PHASE_LOG) {
+                phMergeNs += System.nanoTime() - t0;
+            }
+        }
+        if (PHASE_LOG) {
+            phSortCallNs += System.nanoTime() - tSortCall0;
+            long span = phLastSortAtNs - phFirstSortAtNs;
+            long runSpan = System.nanoTime() - phRunStartNs;
+            // spreadPct = what fraction of the run's lifetime the sorting was spread over.
+            // ~0 means all sorting happened at one instant (load-everything-then-sort);
+            // approaching 100 means sort work tracked data arrival.
+            long spreadPct = runSpan > 0 ? (100L * span / runSpan) : 0;
+            long residual = runSpan - (phGapNs + phInsertNs + phSortCallNs);
+            LOGGER.warn(
+                    "adaptive-sort-phase: run={} loadNs={} sortNs={} cascadeNs={} mergeNs={} sortEvents={} "
+                            + "firstSortAtNs={} lastSortAtNs={} runSpanNs={} spreadPct={} insertNs={} "
+                            + "gapNs={} tuples={} frames={}",
+                    phRunSeq, phLoadNs, phSortNs, phCascadeNs, phMergeNs, phSortEvents, phFirstSortAtNs, phLastSortAtNs,
+                    runSpan, spreadPct, phInsertNs, phGapNs, tupleCount, getFrameCount());
         }
     }
 
@@ -287,12 +415,29 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     private void sealBucket() throws HyracksDataException {
         int len = builtTuples - currentBucketStart;
         if (len > 0) {
+            long t0 = PHASE_LOG ? System.nanoTime() : 0;
             sortBucketSlice(currentBucketStart, len);
+            if (PHASE_LOG) {
+                long now = System.nanoTime();
+                phSortNs += now - t0;
+                phSortEvents++;
+                // WHEN sorting happened, relative to the run's first frame. Interleaved sorting
+                // spreads these across the run; load-then-sort collapses them all to the end.
+                long at = t0 - phRunStartNs;
+                if (phSortEvents == 1) {
+                    phFirstSortAtNs = at;
+                }
+                phLastSortAtNs = at;
+            }
             // [Stage 3] a freshly sorted bucket is a level-0 run. Then, while the mergeFanIn newest runs are
             // all the same size, merge them into one run of the next level up
             pushRun(builtTuples, 0);
+            long tc0 = PHASE_LOG ? System.nanoTime() : 0;
             while (numBuckets >= mergeFanIn && topRunsShareLevel(mergeFanIn)) {
                 mergeTopRuns(mergeFanIn);
+            }
+            if (PHASE_LOG) {
+                phCascadeNs += System.nanoTime() - tc0;
             }
             currentBucketStart = builtTuples;
             sortedFrameCount = getFrameCount(); // every frame so far is now in a sealed, sorted run
@@ -318,6 +463,80 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         numBuckets++;
     }
 
+    // Merge `count` adjacent sorted runs in ONE pass using a tournament (loser-tree) over the run
+    // heads, instead of ceil(log2(count)) balanced pairwise passes.
+    //
+    // Both do the same N*log2(k) comparisons. The difference is data movement:
+    //   balanced pairwise : every pass rewrites every tuple  -> N * log2(k) slot moves
+    //   k-way tournament  : each tuple is written exactly once -> N slot moves
+    // At k=325 runs that is ~8x less pointer traffic, and a slot is ptrSize ints (20-28 bytes), so
+    // movement is where a wide pointer array actually hurts.
+    //
+    // STABLE: ties are broken by run index, and runs are indexed in input order, so the earlier
+    // tuple always wins -- the same guarantee mergeRange gives with `cmp <= 0`.
+    private void mergeRunsKWay(int first, int count, int lo, int hi) throws HyracksDataException {
+        ensureScratchCapacity(hi);
+        // head[i] = next unread tuple index of run i; end[i] = its exclusive end
+        int[] head = new int[count];
+        int[] end = new int[count];
+        int start = lo;
+        for (int i = 0; i < count; i++) {
+            head[i] = start;
+            end[i] = bucketEnds[first + i];
+            start = end[i];
+        }
+        // Winner tree over `count` slots: tree[1] is the overall winner. Leaves live at [size, 2*size).
+        int size = Integer.highestOneBit(Math.max(1, count - 1)) << 1;
+        if (size < count) {
+            size <<= 1;
+        }
+        int[] tree = new int[size * 2];
+        for (int i = 0; i < size; i++) {
+            tree[size + i] = (i < count && head[i] < end[i]) ? i : -1;
+        }
+        for (int i = size - 1; i >= 1; i--) {
+            tree[i] = pickWinner(tree[2 * i], tree[2 * i + 1], head);
+        }
+        int w = lo;
+        while (tree[1] >= 0) {
+            int run = tree[1];
+            copySlot(tPointers, head[run]++, tScratch, w++);
+            if (head[run] >= end[run]) {
+                tree[size + run] = -1; // run exhausted
+            }
+            // replay only the path from this leaf to the root: log2(k) comparisons, no full rebuild
+            for (int node = (size + run) >> 1; node >= 1; node >>= 1) {
+                tree[node] = pickWinner(tree[2 * node], tree[2 * node + 1], head);
+            }
+        }
+        // one copy back; the merge itself wrote each tuple exactly once
+        if (PHASE_LOG) {
+            phMoves += hi - lo;
+        }
+        System.arraycopy(tScratch, lo * ptrSize, tPointers, lo * ptrSize, (hi - lo) * ptrSize);
+        bucketEnds[first] = hi;
+        bucketLevels[first]++;
+        numBuckets = first + 1;
+    }
+
+    /** Lower run index wins ties, which is what keeps the k-way merge stable. */
+    private int pickWinner(int a, int b, int[] head) throws HyracksDataException {
+        if (a < 0) {
+            return b;
+        }
+        if (b < 0) {
+            return a;
+        }
+        int cmp = compare(tPointers, head[a], tPointers, head[b]);
+        if (cmp < 0) {
+            return a;
+        }
+        if (cmp > 0) {
+            return b;
+        }
+        return a < b ? a : b;
+    }
+
     // [Stage 3] Do the `count` newest runs all sit at the same merge level? (cascade trigger)
     private boolean topRunsShareLevel(int count) {
         int level = bucketLevels[numBuckets - 1];
@@ -336,6 +555,10 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         int first = numBuckets - count;
         int lo = first > 0 ? bucketEnds[first - 1] : 0;
         int hi = bucketEnds[numBuckets - 1];
+        if (KWAY_MERGE && count > 2) {
+            mergeRunsKWay(first, count, lo, hi);
+            return;
+        }
         ensureScratchCapacity(hi);
         int[] ends = new int[count];
         System.arraycopy(bucketEnds, first, ends, 0, count);
@@ -373,6 +596,9 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         }
         if (inScratch) {
             // the merged result ended up in tScratch; copy just this group's span back to tPointers
+            if (PHASE_LOG) {
+                phMoves += hi - lo;
+            }
             System.arraycopy(src, lo * ptrSize, tPointers, lo * ptrSize, (hi - lo) * ptrSize);
         }
         bucketEnds[first] = hi; // the merged run now spans [lo, hi)
@@ -387,6 +613,12 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         if (length <= 1) {
             return;
         }
+        // NOTE (2026-08-30): an attempt to remove the trailing copy-back -- insertion-sort small
+        // blocks in place, then pick a block size making the merge pass count even -- measured 3.6%
+        // SLOWER than this version (20.84s vs 20.11s at 512MB). Insertion sort shifts elements with
+        // copySlot, moving ptrSize ints (20-28 bytes) per shift: ~5-7x more data movement than the
+        // merge passes it replaced. Insertion sort only wins when elements are small and comparisons
+        // dominate; neither holds for a pointer array this wide. Do not retry without measuring.
         ensureScratchCapacity(offset + length);
         int end = offset + length;
         int[] src = tPointers;
@@ -405,6 +637,9 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         }
         if (inScratch) {
             // the sorted result ended up in tScratch; copy just this slice back to tPointers
+            if (PHASE_LOG) {
+                phMoves += length;
+            }
             System.arraycopy(src, offset * ptrSize, tPointers, offset * ptrSize, length * ptrSize);
         }
     }
@@ -437,6 +672,9 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     }
 
     private void copySlot(int[] src, int srcTuple, int[] dst, int dstTuple) {
+        if (PHASE_LOG) {
+            phMoves++;
+        }
         System.arraycopy(src, srcTuple * ptrSize, dst, dstTuple * ptrSize, ptrSize);
     }
 
@@ -486,6 +724,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     // [Stage 2] Write out the first `limit` tuples of tPointers, in sorted order. flush() sends all of
     // them; a partial spill (spillSortedKeepUnsorted) sends only the already-sorted prefix.
     private int flushTuples(IFrameWriter writer, int limit) throws HyracksDataException {
+        long tFlush0 = PHASE_LOG ? System.nanoTime() : 0;
         outputAppender.reset(outputFrame, true);
         int maxFrameSize = outputFrame.getFrameSize();
         int io = 0;
@@ -503,6 +742,9 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         }
         maxFrameSize = Math.max(maxFrameSize, outputFrame.getFrameSize());
         outputAppender.write(writer, true);
+        if (PHASE_LOG) {
+            phFlushNs += System.nanoTime() - tFlush0;
+        }
         if (LOGGER.isTraceEnabled()) {
             LOGGER.trace(
                     "Flushed records:" + limit + " out of " + tupleCount + "; Flushed through " + (io + 1) + " frames");
@@ -548,6 +790,9 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     }
 
     protected final int compare(int[] tPointers1, int tp1, int[] tPointers2, int tp2) throws HyracksDataException {
+        if (PHASE_LOG) {
+            phCompares++;
+        }
         if (nkcs != null) {
             int cmpNormalizedKey =
                     NormalizedKeyUtils.compareNormalizeKeys(tPointers1, tp1 * ptrSize + ID_NORMALIZED_KEY, tPointers2,

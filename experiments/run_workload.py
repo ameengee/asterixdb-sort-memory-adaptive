@@ -101,6 +101,11 @@ def main():
     ap.add_argument("--sort-key", default="k")
     ap.add_argument("--sort-memory", default="8MB", help="initial compiler.sortmemory")
     ap.add_argument("--projection", default="r", help="'r' for whole record, or e.g. 'r.k'")
+    ap.add_argument("--query-shape", choices=["records", "count"], default="count",
+                    help="'count' wraps the ORDER BY in a count(*) so the full external sort still "
+                         "runs but the result is 8 bytes. 'records' returns every row -- only use it "
+                         "with --verify on a SMALL dataset: a 10M-row full-record result is ~2GB, "
+                         "which will OOM the client and can take the cluster down with it.")
     ap.add_argument("--grow-pct", type=float, default=0.0, help="raise sort memory by this %% each step")
     ap.add_argument("--grow-every", type=float, default=0.0, help="seconds between memory steps")
     ap.add_argument("--grow-cap-mb", type=float, default=0.0, help="0 = uncapped")
@@ -128,10 +133,21 @@ def main():
     current_mb = mem_mb(args.sort_memory)
     initial_mb = current_mb
 
-    statement_tmpl = (
-        "USE {dv}; SET `compiler.sortmemory` \"{mem}MB\"; "
-        "SELECT VALUE {proj} FROM {ds} AS r ORDER BY r.{key};"
-    )
+    if args.query_shape == "count":
+        # Full external sort, negligible result transfer. Verified on AsterixDB that the optimizer
+        # does NOT eliminate the ORDER BY here -- the sort operator still emits its per-run log lines.
+        statement_tmpl = (
+            "USE {dv}; SET `compiler.sortmemory` \"{mem}MB\"; "
+            "SELECT VALUE count(*) FROM (SELECT VALUE {proj} FROM {ds} AS r ORDER BY r.{key}) AS x;"
+        )
+    else:
+        statement_tmpl = (
+            "USE {dv}; SET `compiler.sortmemory` \"{mem}MB\"; "
+            "SELECT VALUE {proj} FROM {ds} AS r ORDER BY r.{key};"
+        )
+
+    if args.verify and args.query_shape == "count":
+        sys.exit("--verify needs actual rows; use --query-shape records (on a SMALL dataset)")
 
     manifest = {
         "label": args.label,
@@ -195,6 +211,11 @@ def main():
                       f"{metrics.get('clientElapsed', 0):.2f}s", flush=True)
                 continue
 
+            size = metrics.get("resultSize") or 0
+            if isinstance(size, int) and size > 500_000_000:
+                print(f"[driver] WARNING seq={seq}: {size / 1e9:.2f}GB result. Large results are "
+                      f"materialized client-side and can OOM the box (and take the cluster with "
+                      f"them). Prefer --query-shape count.", file=sys.stderr, flush=True)
             verified = inversions = distinct_ids = rows = ""
             if args.verify and ok:
                 is_sorted, inversions, distinct_ids, rows = verify_sorted(results, args.sort_key)

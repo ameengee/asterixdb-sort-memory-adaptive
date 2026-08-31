@@ -2,8 +2,11 @@
 """
 Memory-adaptive sort -- E1 ("no harm") analysis.
 
-Compares the stock and adaptive arms on latency, and summarizes the CPU/disk pressure time
-series that shows *how* the work is distributed (the sawtooth question).
+Compares the stock and adaptive arms on query latency.
+
+Resource-shape questions are NOT answered here: process-level CPU sampling cannot separate loading
+from sorting (both are ~100% busy on the operator thread). Use the sorter's own phase counters
+(-Dhyracks.sort.phaseLog=true) plus make_figures.py for that.
 
 Because blocks alternate (stock, adaptive, stock, adaptive, ...), this also reports each arm
 per round, so machine drift is visible instead of being silently folded into the comparison.
@@ -30,32 +33,6 @@ def load_latency(path):
     with open(path) as fh:
         rows = [r for r in csv.DictReader(fh) if r.get("ok") == "True"]
     return [float(r["clientElapsedMs"]) for r in rows]
-
-
-def load_pressure(path):
-    cpu, wr, rd = [], [], []
-    if not os.path.exists(path):
-        return cpu, wr, rd
-    with open(path) as fh:
-        for r in csv.DictReader(fh):
-            try:
-                cpu.append(float(r["cpuPctTotal"]))
-                wr.append(float(r["writeMBps"] or 0))
-                rd.append(float(r["readMBps"] or 0))
-            except (ValueError, KeyError):
-                continue
-    return cpu, wr, rd
-
-
-def burstiness(xs):
-    """Coefficient of variation. Higher = spikier (the sawtooth); lower = smoother."""
-    xs = [x for x in xs if x is not None]
-    if len(xs) < 2:
-        return float("nan")
-    m = st.mean(xs)
-    if m == 0:
-        return float("nan")
-    return st.pstdev(xs) / m
 
 
 def main():
@@ -110,29 +87,6 @@ def main():
             sv, av = f(s), f(a)
             print(f"  {name:5} stock={sv:8.1f}ms  adaptive={av:8.1f}ms  "
                   f"delta={av - sv:+8.1f}ms ({(av - sv) / sv * 100:+.2f}%)")
-
-    print("\n" + "=" * 78)
-    print("PRESSURE  (cv = coefficient of variation; HIGHER = burstier/sawtooth)")
-    print("=" * 78)
-    print(f"{'arm':10} {'samples':>8} {'cpu_mean':>9} {'cpu_max':>9} {'cpu_cv':>8} "
-          f"{'wr_mean':>9} {'wr_cv':>8}")
-    print("-" * 78)
-    for arm in sorted(arms):
-        allcpu, allwr = [], []
-        for rnd in sorted(arms[arm]):
-            p = arms[arm][rnd].replace(".csv", ".pressure.csv")
-            cpu, wr, _ = load_pressure(p)
-            allcpu += cpu
-            allwr += wr
-        if not allcpu:
-            print(f"{arm:10} {'(no pressure samples)':>30}")
-            continue
-        print(f"{arm:10} {len(allcpu):>8} {st.mean(allcpu):>9.1f} {max(allcpu):>9.1f} "
-              f"{burstiness(allcpu):>8.3f} {st.mean(allwr):>9.3f} {burstiness(allwr):>8.3f}")
-
-    print("\nNote: cv compares the SHAPE of resource use. The claim under test is that the")
-    print("incremental bucket sort spreads CPU across data arrival, lowering cpu_cv relative")
-    print("to stock's load-then-sort sawtooth.")
 
 
 if __name__ == "__main__":
