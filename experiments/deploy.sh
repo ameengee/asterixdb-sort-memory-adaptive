@@ -125,11 +125,16 @@ echo "[deploy] starting cluster..."
 # stale lines from a previous arm and give a false confirmation.
 sleep 2
 BEFORE=$(cat "$CLUSTER"/logs/nc-*.log 2>/dev/null | wc -l | tr -d ' ')
-# Sorts 200k generated values: enough to construct the external sort operator (so the broker
-# line is emitted) but ~1s, and independent of any loaded dataset. It previously sorted the whole
-# 10M-row table on EVERY deploy, which cost more than the experiment it was verifying.
+# Confirmation sort. Requirements: must construct the external sort operator (so the broker line
+# is emitted) AND be fast, since this runs on EVERY deploy.
+#   - sorting range() does NOT construct it (measured: 0 broker lines) -- the optimizer handles it
+#     another way, so it silently confirms nothing
+#   - the 10M-row table DOES, but took ~5 min per deploy -- more work than the experiment itself
+#   - the 400k-row `small.ds` does, in ~1s
+# Create small.ds once per instance (the correctness check does). If it is absent, the
+# confirmation below simply reports that it could not verify, rather than failing the deploy.
 curl -s -m 120 -o /dev/null "http://127.0.0.1:19002/query/service" \
-  --data-urlencode 'statement=SELECT VALUE count(*) FROM (SELECT VALUE x FROM range(1,200000) AS x ORDER BY x DESC) AS y;' || true
+  --data-urlencode 'statement=USE small; SELECT VALUE count(*) FROM (SELECT VALUE r FROM ds AS r ORDER BY r.k) AS x;' || true
 # NOTE: deliberately no LIMIT -- a LIMIT routes to the top-K sorter (HeapSortRunGenerator), which
 # never constructs the adaptive run generator, so the broker line would never appear.
 # `|| true`: with `set -o pipefail`, grep finding nothing would return 1 and abort the script.
