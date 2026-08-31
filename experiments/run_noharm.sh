@@ -22,15 +22,23 @@ echo RUNNING > /mnt/nvme/noharm.status
 beat(){ echo "$1" > /mnt/nvme/noharm.heartbeat; }
 fail(){ echo "$1" >&2; echo FAILED > /mnt/nvme/noharm.status; exit 1; }
 
+# THREE arms. The distinction matters: mergeTopRuns only uses the k-way tournament when it is
+# merging MORE THAN TWO runs, so with the default fan-in of 2 the cascade merges pairwise and
+# k-way only ever sees a small residual final merge. The configuration that won yesterday's matrix
+# was a LARGE fan-in (no cascade) feeding one big k-way merge.
+#   stock      : master jar
+#   adapt-eager: fan-in 2 + k-way  -- eager cascade, k-way barely engaged
+#   adapt-kway : huge fan-in + k-way -- no cascade, one k-way merge over all runs (best known)
+ARMS=${ARMS:-"stock adapt-eager adapt-kway"}
 deploy_arm(){ # $1=arm $2=tag
-  local n=$1
-  if [ "$n" = stock ]; then
-    ./deploy.sh --jar $JARDIR/master.jar --broker stock --heap 8g > $OUT/deploy-$2.log 2>&1 \
-      || fail "DEPLOY FAILED stock $2"
-  else
-    ./deploy.sh --jar $JARDIR/adaptive.jar --broker none --heap 8g --kway true --cap-mult 1 \
-      > $OUT/deploy-$2.log 2>&1 || fail "DEPLOY FAILED adaptive $2"
-  fi
+  case "$1" in
+    stock)       ./deploy.sh --jar $JARDIR/master.jar --broker stock --heap 8g ;;
+    adapt-eager) ./deploy.sh --jar $JARDIR/adaptive.jar --broker none --heap 8g \
+                   --kway true --merge-fan-in 2 --cap-mult 1 ;;
+    adapt-kway)  ./deploy.sh --jar $JARDIR/adaptive.jar --broker none --heap 8g \
+                   --kway true --merge-fan-in 1000000 --cap-mult 1 ;;
+    *) fail "unknown arm $1" ;;
+  esac > $OUT/deploy-$2.log 2>&1 || fail "DEPLOY FAILED $1 $2"
   grep -q 'jar verified' $OUT/deploy-$2.log || fail "jar not verified for $2"
 }
 qtime(){ curl -s -o /dev/null -m 1800 -w '%{time_total}' "$Q" \
@@ -38,7 +46,7 @@ qtime(){ curl -s -o /dev/null -m 1800 -w '%{time_total}' "$Q" \
 
 echo "=== PROBE: one query per level per arm, to size the run ===" | tee $OUT/probe.txt
 for MEM in $LEVELS; do
-  for ARM in stock adaptive; do
+  for ARM in $ARMS; do
     beat "probe-$MEM-$ARM"; deploy_arm $ARM "probe-$MEM-$ARM"
     echo "PROBE $ARM $MEM $(qtime $MEM)" | tee -a $OUT/probe.txt
   done
@@ -47,7 +55,7 @@ done
 echo "=== MAIN: $ROUNDS rounds x $REPS reps = $((ROUNDS*REPS)) trials per cell ===" | tee $OUT/timings.txt
 for round in $(seq 1 $ROUNDS); do
   for MEM in $LEVELS; do
-    for ARM in stock adaptive; do
+    for ARM in $ARMS; do
       beat "r$round-$MEM-$ARM"
       deploy_arm $ARM "$MEM-$ARM"
       qtime $MEM >/dev/null   # warm
