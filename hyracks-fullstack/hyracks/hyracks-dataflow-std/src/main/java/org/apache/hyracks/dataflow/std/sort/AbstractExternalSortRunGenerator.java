@@ -44,7 +44,13 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
 
     // [ADDED for memory-adaptive sort]
     private static final Logger ADAPT_LOGGER = LogManager.getLogger();
-    private static final int ADAPT_CAP_MULTIPLIER = 4;
+    // Growth ceiling as a multiple of the compile-time budget. Configurable because the product
+    // adaptiveMaxFrames * frameSize must fit in an int (VariableFramePool takes an int byte budget,
+    // so AsterixDB caps sort memory at ~2GB per operator). With the default 4x we overflow above
+    // ~512MB of sort memory -- 4x earlier than stock. Set to 1 when the broker is inert and no
+    // growth is possible, which lets us measure at the same ceiling stock reaches.
+    private static final int ADAPT_CAP_MULTIPLIER =
+            Math.max(1, Integer.getInteger("hyracks.sort.adaptCapMultiplier", 4));
     // [Experiment harness] How often we poll the broker for a reclaim demand. Lower = the broker gets
     // more chances to act, which matters when sweeping eviction frequency (E3/E4).
     private static final int VICTIM_CHECK_INTERVAL =
@@ -93,8 +99,8 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
         // [Experiment harness] The broker policy is chosen at runtime (system properties) so one jar
         // covers every experimental arm; see MemoryBrokerFactory. Default stays the random shell.
         AdaptiveVariableFrameMemoryManager bufferManager = new AdaptiveVariableFrameMemoryManager(
-                new VariableFramePool(ctx, adaptiveMaxFrames * ctx.getInitialFrameSize()), freeSlotPolicy,
-                MemoryBrokerFactory.create());
+                new VariableFramePool(ctx, poolBudgetBytes(adaptiveMaxFrames, ctx.getInitialFrameSize())),
+                freeSlotPolicy, MemoryBrokerFactory.create());
         this.broker = bufferManager;
         if (alg == Algorithm.MERGE_SORT) {
             frameSorter = new FrameSorterMergeSort(ctx, bufferManager, maxSortFrames, sortFields,
@@ -107,6 +113,19 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
 
     // IMPORTANT: set spilled frames to null, need to allow GC to reclaim that memory. Cannot lie about reducing
     // budget and call it a day.
+    // Compute the pool budget in long arithmetic and clamp, so an oversized configuration fails
+    // visibly at the cap instead of silently wrapping to a small (or negative) budget.
+    private static int poolBudgetBytes(int frames, int frameSize) {
+        long bytes = (long) frames * frameSize;
+        if (bytes > Integer.MAX_VALUE) {
+            ADAPT_LOGGER.warn("adaptive-sort: pool budget {} bytes exceeds the int limit; clamping to {}. "
+                    + "AsterixDB's VariableFramePool takes an int byte budget, so sort memory is capped "
+                    + "near 2GB per operator.", bytes, Integer.MAX_VALUE);
+            return Integer.MAX_VALUE;
+        }
+        return (int) bytes;
+    }
+
     @Override
     public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
         // (1) Every N frames: send current status to broker and read victim flag. If victim, shrink budget

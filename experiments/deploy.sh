@@ -27,7 +27,7 @@ fi
 BROKER=random; PERIOD=10; ACTION=reclaim; FRACTION=0.5
 VICTIM_PROB=0.3; SEED=0; DISTRIBUTION=normal; MEAN=0.5; STDDEV=0.15; DF=5
 SCRIPT_PATH=""; BUCKET_BYTES=262144; MERGE_FAN_IN=2; PARTIAL_SPILL=true
-VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false
+VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false; CAPMULT=4
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -51,6 +51,7 @@ while [[ $# -gt 0 ]]; do
     --jar) JAR_OVERRIDE="$2"; BUILD=0; shift 2;;
     --phase-log) PHASE_LOG="$2"; shift 2;;
     --kway) KWAY="$2"; shift 2;;
+    --cap-mult) CAPMULT="$2"; shift 2;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done
@@ -73,6 +74,7 @@ JVM_ARGS="$JVM_ARGS -Dhyracks.sort.partialSpill=$PARTIAL_SPILL"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.victimCheckInterval=$VICTIM_INTERVAL"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.phaseLog=$PHASE_LOG"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.kwayMerge=$KWAY"
+JVM_ARGS="$JVM_ARGS -Dhyracks.sort.adaptCapMultiplier=$CAPMULT"
 
 echo "[deploy] jvm.args = $JVM_ARGS"
 
