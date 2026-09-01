@@ -135,6 +135,13 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     //                     flush -- i.e. Stage 1 disabled, the stock-sorter baseline in-build.
     private static final long BUCKET_TARGET_BYTES = Long.getLong("hyracks.sort.bucketTargetBytes", 256L * 1024);
     private long bucketTargetBytes = BUCKET_TARGET_BYTES;
+    // [U-curve investigation] Seal a bucket after this many TUPLES, if > 0 (0 = use the byte target).
+    // Total slot moves for bucket-sort + one k-way merge is about N*(log2(bucketTuples) + 1), so the
+    // TUPLE count is what the cost actually depends on; bytes are only a proxy, and the proxy drifts
+    // with tuple width and with ptrSize (3..7 ints by key type). Sweeping this directly tests whether
+    // smaller buckets profitably trade sort passes for merge fan-in.
+    private static final int BUCKET_TARGET_TUPLES = Integer.getInteger("hyracks.sort.bucketTargetTuples", 0);
+    private int currentBucketTuples;
     private long currentBucketBytes; // data bytes accumulated in the current, unsealed bucket
     private int builtTuples; // # tuples whose pointers are already built into tPointers
     private int currentBucketStart; // tuple index where the current (unsealed) bucket starts
@@ -210,6 +217,22 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         this.outputLimit = outputLimit;
         this.fta2 = new FrameTupleAccessor(recordDescriptor);
         this.tmpPointer = new int[ptrSize];
+        // [U-curve investigation] What the sort actually got for keys. This decides the cost of every
+        // single comparison:
+        //   nkcs=none  -> NO normalized key. Every compare() dereferences tuple bytes through
+        //                 bufferManager.getFrame() and runs the full binary comparator. This happens
+        //                 when the sort key's static type is unknown -- e.g. an UNDECLARED field of an
+        //                 `open` type, whose type is ANY, which hits `default: return null` in
+        //                 NormalizedKeyComputerFactoryProvider.
+        //   decisive=true  -> comparisons stop at the normalized key; tuple bytes are never touched.
+        //   decisive=false -> normalized key is only a prefix (e.g. UTF8 strings get ONE int) and ties
+        //                 fall through to the comparator.
+        // ptrSize = 3 + normalizedKeyTotalLength, so ptrSize==3 means no normalized key at all.
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.warn("adaptive-sort-keys: ptrSize={} nkcs={} nkTotalLen={} decisive={} comparators={}", ptrSize,
+                    nkcs == null ? "none" : String.valueOf(nkcs.length), normalizedKeyTotalLength,
+                    normalizedKeysDecisive, comparators.length);
+        }
     }
 
     // [ADDED for memory-adaptive sort]
@@ -247,6 +270,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         this.builtTuples = 0;
         this.currentBucketStart = 0;
         this.currentBucketBytes = 0;
+        this.currentBucketTuples = 0;
         this.numBuckets = 0;
         this.sortedFrameCount = 0;
         // phase counters are per-run: clear them so each run reports its own timeline
@@ -296,10 +320,13 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
                 tupleCount += inserted;
                 buildFramePointers(frameIndex);
                 currentBucketBytes += inputBuffer.capacity();
+                currentBucketTuples += inserted;
                 if (PHASE_LOG) {
                     phLoadNs += System.nanoTime() - t0;
                 }
-                if (currentBucketBytes >= bucketTargetBytes) {
+                boolean seal = BUCKET_TARGET_TUPLES > 0 ? currentBucketTuples >= BUCKET_TARGET_TUPLES
+                        : currentBucketBytes >= bucketTargetBytes;
+                if (seal) {
                     sealBucket();
                 }
                 if (PHASE_LOG) {
@@ -373,10 +400,10 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
                     "adaptive-sort-phase: run={} loadNs={} sortNs={} cascadeNs={} mergeNs={} "
                             + "sortCallNs={} flushNs={} residualNs={} moves={} compares={} sortEvents={} "
                             + "firstSortAtNs={} lastSortAtNs={} runSpanNs={} spreadPct={} insertNs={} "
-                            + "gapNs={} tuples={} frames={} bucketBytes={} fanIn={} kway={}",
+                            + "gapNs={} tuples={} frames={} bucketBytes={} bucketTuples={} fanIn={} kway={}",
                     phRunSeq, phLoadNs, phSortNs, phCascadeNs, phMergeNs, phSortCallNs, phFlushNs, residual, phMoves,
                     phCompares, phSortEvents, phFirstSortAtNs, phLastSortAtNs, runSpan, spreadPct, phInsertNs, phGapNs,
-                    tupleCount, getFrameCount(), bucketTargetBytes, mergeFanIn, KWAY_MERGE);
+                    tupleCount, getFrameCount(), bucketTargetBytes, BUCKET_TARGET_TUPLES, mergeFanIn, KWAY_MERGE);
         }
     }
 
@@ -445,6 +472,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
             sortedFrameCount = getFrameCount(); // every frame so far is now in a sealed, sorted run
         }
         currentBucketBytes = 0;
+        currentBucketTuples = 0;
     }
 
     // [Stage 3] record a new sorted run: its end tuple index and its merge level (size).
