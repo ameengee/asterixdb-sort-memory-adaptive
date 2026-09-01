@@ -9,18 +9,27 @@ cd "$(dirname "$0")"
 export REPO_ROOT=~/Ameen/asterixdb JARDIR=~/Ameen/jars JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 Q=http://127.0.0.1:19002/query/service
 CL=$REPO_ROOT/asterixdb/asterix-server/target/asterix-server-0.9.10-SNAPSHOT-binary-assembly/apache-asterixdb-0.9.10-SNAPSHOT/opt/local
-sql(){ curl -s -o /dev/null -m 600 "$Q" --data-urlencode "statement=$1"; }
+# Report failures instead of swallowing them: an earlier version hid a broken INSERT behind
+# -o /dev/null and produced a vacuous "0 rows, all good" result.
+sql(){ local out
+  out=$(curl -s -m 600 "$Q" --data-urlencode "statement=$1")
+  if ! echo "$out" | grep -q '"status": *"success"'; then
+    echo "SQL FAILED: $(echo "$out" | python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("errors"))[:300])' 2>/dev/null || echo "$out" | head -c 200)" >&2
+    return 1
+  fi; }
 
 echo "=== building a deliberately MIXED-TYPE column ==="
 sql 'DROP DATAVERSE mixed IF EXISTS;'
 sql 'CREATE DATAVERSE mixed; USE mixed; CREATE TYPE t AS open {id:int64}; CREATE DATASET ds(t) PRIMARY KEY id;'
 # k is int64 for even ids, string for odd ids, double for every 5th -> three distinct type tags
 sql 'USE mixed; INSERT INTO ds (SELECT VALUE {"id":x,
-       "k": CASE WHEN x %% 5 = 0 THEN double((x*48271) %% 100000)
-                 WHEN x %% 2 = 0 THEN (x*48271) %% 100000
-                 ELSE string((x*48271) %% 100000) END }
-     FROM range(1,200000) AS x);'
-echo "  rows: $(curl -s "$Q" --data-urlencode 'statement=SELECT VALUE count(*) FROM mixed.ds;' | python3 -c 'import json,sys;print(json.load(sys.stdin)["results"][0])')"
+       "k": CASE WHEN x % 5 = 0 THEN double((x*48271) % 100000)
+                 WHEN x % 2 = 0 THEN (x*48271) % 100000
+                 ELSE string((x*48271) % 100000) END }
+     FROM range(1,200000) AS x);' || exit 1
+ROWS=$(curl -s "$Q" --data-urlencode 'statement=SELECT VALUE count(*) FROM mixed.ds;' | python3 -c 'import json,sys;print(json.load(sys.stdin)["results"][0])')
+echo "  rows: $ROWS"
+[ "$ROWS" -gt 0 ] || { echo "ABORT: dataset is empty, nothing to test" >&2; exit 1; }
 
 run(){ # $1=label $2=extra deploy args
   ./deploy.sh --jar $2 >/dev/null 2>&1
