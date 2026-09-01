@@ -213,3 +213,65 @@ Every one of these cost us real time this session:
    10M-row record-returning query materialises ~2.2GB.
 9. **`mvn -pl <module>` alone resolves siblings from `~/.m2`**, which may be stale or missing. Use
    `-am`, and do not use `-o` unless the deps are known to be present.
+
+---
+
+# SESSION UPDATE — 2026-09-01 (U-curve investigation)
+
+## New branch
+`sort-ucurve-investigation` (off `sort-memory-adaptive`). Keep the paper work on the old branch.
+
+## Lab machines replace EC2 for this work
+9 shared NUCs, `10.16.229.101` .. `.109`, user `dbis-nuc01`, campus VPN required.
+Key auth installed on `.101`; the rest still need `ssh-copy-id`.
+**HARD RULE: work only inside `~/Ameen/`.** Other users' data lives in that home dir
+(`asterixdb/`, `Calvin/`, `Hongyu/`, `TPCDS/`). nuc01: 4 cores / 8 threads, 62GB RAM (~39GB free,
+~22GB already used by others), 1.8TB NVMe, JDK 21, Maven 3.6.3.
+The box is SHARED -- check `uptime`/`who`/top-CPU before and after every timing run.
+
+## Instrumentation added and committed (compiles clean)
+1. **`adaptive-sort-keys` log line** at sorter construction:
+   `ptrSize`, `nkcs` (none / count), `nkTotalLen`, `decisive`, `comparators`.
+   `ptrSize == 3` means NO normalized key at all.
+2. **`-Dhyracks.sort.bucketTargetTuples=N`** (`deploy.sh --bucket-tuples N`): seal buckets by TUPLE
+   count instead of bytes. Moves are about `N*(log2(bucketTuples)+1)`, so tuples is the quantity
+   cost depends on; bytes are a proxy that drifts with tuple width and ptrSize.
+
+## The question
+Why does giving the sort MORE memory make it SLOWER? Fix it.
+
+## Theories to test, and how
+| # | theory | origin | test |
+| :-- | :-- | :-- | :-- |
+| T1 | Sort key gets NO normalized key. `k` is an UNDECLARED field of an `open` type, so its static type is ANY, and `NormalizedKeyComputerFactoryProvider` hits `default: return null`. Every compare() then dereferences tuple bytes through `bufferManager.getFrame()`. | Claude | read `adaptive-sort-keys`; compare untyped `k` vs a CLOSED type declaring `k: bigint` |
+| T2 | String normalized keys are 1 int and INDECISIVE (there is a TODO in `UTF8StringNormalizedKeyComputerFactory` to widen it), so string sorts always fall through to the comparator | Ameen | sort a typed STRING column vs a typed BIGINT column |
+| T3 | In-memory sort work is `N*log2(runSize)`, which GROWS with memory, while external-merge savings SATURATE once the merge is single-pass (`maxMergeWidth ~1023`, we have 2-9 runs) | Claude | stage split vs run count across memory levels |
+| T4 | Bucket size is far too large. Moves ~ `N*(log2(B)+1)`; B~15,400 tuples gives 16 moves/tuple (measured exactly). B=256 would give ~9 -- a 44% cut | Claude | sweep `--bucket-tuples` 256/1K/4K/16K/64K, measure moves/tuple and time |
+| T5 | GC pressure grows with heap-resident sort memory | curve-theories doc | `-Xlog:gc` across memory levels |
+| T6 | Cache/TLB locality collapse as runs outgrow LLC | curve-theories doc | largely follows from T1/T4 (comparator pointer-chasing) |
+| T7 | Over-wide single-pass merge fan-in | curve-theories doc | partly covered by the fan-in matrix already run |
+
+## Evidence for T3 already in hand (from the EC2 sweep)
+| memory | runs | prediction | measured |
+| :-- | --: | :-- | --: |
+| 32MB | ~9 | - | 15.60s |
+| 320MB | 2 | +log2(9/2) = 2.2 extra passes | 18.50s |
+| 2GB | 2 | run size unchanged -> FLAT | 18.59s |
+The 320MB->2GB flatness is the tell: run count stops changing, so sort work stops growing.
+
+## Tomorrow, in order
+1. Clone the branch into `~/Ameen/` on nuc01 and build.
+2. Load TWO datasets: the existing untyped one, and a CLOSED-type one declaring `k: bigint`
+   (plus a string column) -- this is the T1/T2 discriminator.
+3. Read `adaptive-sort-keys`. If `ptrSize == 3` on the untyped dataset, T1 is confirmed and it is a
+   finding about AsterixDB independent of our work.
+4. Then T4 (bucket sweep), T3 (stage split vs run count), T5 (GC).
+5. Present ALL theory results together, as Ameen asked.
+
+## Still open from the paper work (on the other branch)
+- The U-curve's LEFT branch is unresolved: 512KB/1MB/2MB zigzag (13.97 / 12.80 / 14.26) with only
+  n=10 from a single restart each, while a single restart can shift a level by 12%.
+- `adapt-eager` (fan-in 2) must not ship as the default: +4.4% / +5.6% above the default memory.
+- Cross-restart variance is itself a finding: identical binary, identical data, provably identical
+  work (counters repeat exactly), up to 12% wall-clock difference. Prefer more restarts over more
+  reps per restart.
