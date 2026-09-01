@@ -27,7 +27,7 @@ fi
 BROKER=random; PERIOD=10; ACTION=reclaim; FRACTION=0.5
 VICTIM_PROB=0.3; SEED=0; DISTRIBUTION=normal; MEAN=0.5; STDDEV=0.15; DF=5
 SCRIPT_PATH=""; BUCKET_BYTES=262144; MERGE_FAN_IN=2; PARTIAL_SPILL=true
-VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false; CAPMULT=4; BUCKET_TUPLES=0
+VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false; CAPMULT=4; BUCKET_TUPLES=0; AUTOKEY=false; AUTOKEYINTS=2
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,6 +53,8 @@ while [[ $# -gt 0 ]]; do
     --kway) KWAY="$2"; shift 2;;
     --cap-mult) CAPMULT="$2"; shift 2;;
     --bucket-tuples) BUCKET_TUPLES="$2"; shift 2;;
+    --auto-type-key) AUTOKEY="$2"; shift 2;;
+    --auto-key-ints) AUTOKEYINTS="$2"; shift 2;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done
@@ -77,6 +79,13 @@ JVM_ARGS="$JVM_ARGS -Dhyracks.sort.phaseLog=$PHASE_LOG"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.kwayMerge=$KWAY"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.adaptCapMultiplier=$CAPMULT"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.bucketTargetTuples=$BUCKET_TUPLES"
+# Runtime sort-key type detection is chosen at QUERY COMPILE time, which happens on the CC -- not
+# the NC. The CC is launched by bin/asterixcc, which honours $JAVA_OPTS; the NCs are spawned by the
+# NCService and only see jvm.args. Set it in BOTH: the CC picks the normalizer, the NC runs the
+# sorter that consumes it.
+AUTOKEY_ARGS="-Dasterix.sort.autoTypeKey=$AUTOKEY -Dasterix.sort.autoKeyInts=$AUTOKEYINTS"
+JVM_ARGS="$JVM_ARGS $AUTOKEY_ARGS"
+export JAVA_OPTS="${JAVA_OPTS:-} $AUTOKEY_ARGS"
 
 echo "[deploy] jvm.args = $JVM_ARGS"
 
