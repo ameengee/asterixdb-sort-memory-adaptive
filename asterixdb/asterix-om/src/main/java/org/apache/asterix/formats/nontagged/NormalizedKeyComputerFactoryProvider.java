@@ -21,6 +21,7 @@ package org.apache.asterix.formats.nontagged;
 import org.apache.asterix.dataflow.data.nontagged.keynormalizers.AUUIDNormalizedKeyComputerFactory;
 import org.apache.asterix.dataflow.data.nontagged.keynormalizers.AWrappedAscNormalizedKeyComputerFactory;
 import org.apache.asterix.dataflow.data.nontagged.keynormalizers.AWrappedDescNormalizedKeyComputerFactory;
+import org.apache.asterix.dataflow.data.nontagged.keynormalizers.DynamicNormalizedKeyComputerFactory;
 import org.apache.asterix.om.types.IAType;
 import org.apache.hyracks.algebricks.data.INormalizedKeyComputerFactoryProvider;
 import org.apache.hyracks.api.dataflow.value.INormalizedKeyComputerFactory;
@@ -36,6 +37,14 @@ public class NormalizedKeyComputerFactoryProvider implements INormalizedKeyCompu
     public static final NormalizedKeyComputerFactoryProvider INSTANCE = new NormalizedKeyComputerFactoryProvider();
 
     private NormalizedKeyComputerFactoryProvider() {
+    }
+
+    private static boolean autoTypeKey() {
+        return Boolean.getBoolean("asterix.sort.autoTypeKey");
+    }
+
+    private static int autoKeyInts() {
+        return Integer.getInteger("asterix.sort.autoKeyInts", 2);
     }
 
     @Override
@@ -63,7 +72,13 @@ public class NormalizedKeyComputerFactoryProvider implements INormalizedKeyCompu
                 case UUID:
                     return new AWrappedAscNormalizedKeyComputerFactory(new AUUIDNormalizedKeyComputerFactory());
                 default:
-                    return null;
+                    // Type is unknown or unsupported at compile time -- e.g. an UNDECLARED field of
+                    // an `open` type, whose static type is ANY. Stock returns null here, leaving the
+                    // sorter with no normalized key at all. Opt in to runtime type detection with
+                    // -Dasterix.sort.autoTypeKey=true; the width knob is asterix.sort.autoKeyInts.
+                    // NOTE: reached ONLY when the type is not known, so a properly typed column keeps
+                    // its own (better, possibly decisive) normalizer and is unaffected.
+                    return autoTypeKey() ? new DynamicNormalizedKeyComputerFactory(autoKeyInts(), true) : null;
             }
         } else {
             switch (type.getTypeTag()) {
@@ -87,7 +102,7 @@ public class NormalizedKeyComputerFactoryProvider implements INormalizedKeyCompu
                 case UUID:
                     return new AWrappedDescNormalizedKeyComputerFactory(new AUUIDNormalizedKeyComputerFactory());
                 default:
-                    return null;
+                    return autoTypeKey() ? new DynamicNormalizedKeyComputerFactory(autoKeyInts(), false) : null;
             }
         }
     }

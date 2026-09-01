@@ -22,4 +22,20 @@ public interface INormalizedKeyComputer {
     void normalize(byte[] bytes, int start, int length, int[] normalizedKeys, int keyStart);
 
     INormalizedKeyProperties getNormalizedKeyProperties();
+
+    /**
+     * Whether the keys produced so far are still usable for ordering.
+     * <p>
+     * Static normalizers always return {@code true}: the column's type is known at compile time, so
+     * every key is computed the same way. A RUNTIME-TYPE-DETECTING normalizer cannot promise that.
+     * It infers the type from the first value it sees, which is only sound while the column stays
+     * homogeneous -- AsterixDB compares values of different types by comparing their type tags
+     * (and numeric types by promoted value), and no fixed-width key can reproduce both rules at
+     * once. On seeing a second distinct type tag such a normalizer returns {@code false}, and the
+     * caller must stop using normalized keys and fall back to the binary comparator, discarding any
+     * ordering already derived from them.
+     */
+    default boolean isKeyValid() {
+        return true;
+    }
 }

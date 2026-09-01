@@ -121,6 +121,14 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     //   same compares + same moves  -> the memory system is the cost (cache/TLB), not the algorithm
     // A balanced pairwise merge of k runs costs N*log2(k) moves; a k-way tournament merge costs the
     // same comparisons but only N moves. These counters are what tells the two apart.
+    // [Auto type key] A runtime-type-detecting normalizer is only sound while the sort column is
+    // homogeneous: AsterixDB orders different types by type tag but numeric types by promoted value,
+    // and no fixed-width key reproduces both. Such a normalizer reports isKeyValid()==false the
+    // moment it sees a second distinct tag. When that happens the keys computed so far are NOT a
+    // valid ordering, so we must stop consulting them AND discard any ordering already derived from
+    // them -- which for this sorter means re-sorting the whole run with the comparator alone, since
+    // buckets are sorted during accumulation.
+    private boolean nkUsable = true;
     private long phMoves; // tuple-slot moves (each is ptrSize ints)
     private long phCompares; // calls to compare()
     // Coverage check: span must equal gap + insert + sortCall + residual. A large residual means a
@@ -271,6 +279,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         this.currentBucketStart = 0;
         this.currentBucketBytes = 0;
         this.currentBucketTuples = 0;
+        this.nkUsable = true;
         this.numBuckets = 0;
         this.sortedFrameCount = 0;
         // phase counters are per-run: clear them so each run reports its own timeline
@@ -379,6 +388,22 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         // Now, pointers are built incrementally in insertFrame and full buckets are already sorted.
         // Here we just seal the last bucket and merge the buckets.
 
+        if (!nkUsable && numBuckets > 0) {
+            // Buckets were sorted while the (now-invalid) normalized keys were still trusted, so
+            // their internal order cannot be relied upon. Discard the bucket structure and sort the
+            // whole run again -- compare() now ignores the keys, so this pass is comparator-only.
+            // Rare by construction: it needs a genuinely mixed-type sort column.
+            LOGGER.warn("adaptive-sort: normalized keys invalidated (heterogeneous sort column); "
+                    + "re-sorting {} tuples with the comparator alone", builtTuples);
+            numBuckets = 0;
+            currentBucketStart = 0;
+            currentBucketBytes = 0;
+            currentBucketTuples = 0;
+            sortBucketSlice(0, builtTuples);
+            pushRun(builtTuples, 0);
+            currentBucketStart = builtTuples;
+            return;
+        }
         sealBucket();
         if (numBuckets > 1) {
             long t0 = PHASE_LOG ? System.nanoTime() : 0;
@@ -426,6 +451,9 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
             tPointers[ptr * ptrSize + ID_TUPLE_END] = tEnd;
             if (nkcs == null) {
                 continue;
+            }
+            if (nkUsable && !nkcs[0].isKeyValid()) {
+                nkUsable = false; // column turned out to be heterogeneous
             }
             int keyPos = ptr * ptrSize + ID_NORMALIZED_KEY;
             for (int k = 0; k < nkcs.length; k++) {
@@ -823,7 +851,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         if (PHASE_LOG) {
             phCompares++;
         }
-        if (nkcs != null) {
+        if (nkcs != null && nkUsable) {
             int cmpNormalizedKey =
                     NormalizedKeyUtils.compareNormalizeKeys(tPointers1, tp1 * ptrSize + ID_NORMALIZED_KEY, tPointers2,
                             tp2 * ptrSize + ID_NORMALIZED_KEY, normalizedKeyTotalLength);
