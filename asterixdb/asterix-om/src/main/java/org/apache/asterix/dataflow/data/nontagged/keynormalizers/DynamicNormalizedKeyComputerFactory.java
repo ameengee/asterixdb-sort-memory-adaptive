@@ -55,6 +55,22 @@ import org.apache.hyracks.util.string.UTF8StringUtil;
  */
 public class DynamicNormalizedKeyComputerFactory implements INormalizedKeyComputerFactory {
 
+    /**
+     * All numeric types share one ordering class, because AsterixDB compares numerics by promoted
+     * value rather than by tag. The value 4 (BIGINT's raw tag) is chosen so the merged class still
+     * sits correctly relative to the non-numeric tags that matter in practice -- STRING(13),
+     * BOOLEAN(15), the date/time family(16-18, 36-37), UUID(38). The tags that fall between the
+     * numeric ranges (UINT8-64 = 5-8, BINARY = 9, BITARRAY = 10) cannot be ordered correctly against
+     * it; those mark the key invalid instead.
+     */
+    private static final int NUMERIC_CLASS = 4;
+
+    /** Order-preserving 64-bit image of a double: flip the sign bit, or invert if negative. */
+    private static long doubleBits(double d) {
+        long b = Double.doubleToLongBits(d);
+        return b >= 0 ? (b ^ Long.MIN_VALUE) : ~b;
+    }
+
     private static final long serialVersionUID = 1L;
     /** ints per key; 1 or 2. */
     private final int width;
@@ -95,72 +111,93 @@ public class DynamicNormalizedKeyComputerFactory implements INormalizedKeyComput
         final int w = width;
         final boolean asc = ascending;
         return new INormalizedKeyComputer() {
-            private byte firstTag = -1;
             private boolean valid = true;
 
             @Override
             public void normalize(byte[] bytes, int start, int length, int[] keys, int keyStart) {
                 byte tag = bytes[start];
-                if (firstTag < 0) {
-                    firstTag = tag;
-                } else if (tag != firstTag) {
-                    valid = false;
-                }
-                long v;
+                ATypeTag t = ATypeTag.VALUE_TYPE_MAPPING[tag];
                 int vs = start + 1; // skip the Asterix type tag byte
-                switch (ATypeTag.VALUE_TYPE_MAPPING[tag] == null ? ATypeTag.ANY : ATypeTag.VALUE_TYPE_MAPPING[tag]) {
+                long v; // order-preserving 64-bit image of the value, within its class
+                int cls; // ordering class -- see below
+                switch (t == null ? ATypeTag.ANY : t) {
+                    // ---- NUMERIC FAMILY -------------------------------------------------------
+                    // The comparator compares numerics by PROMOTED VALUE and ignores their tags, so
+                    // every numeric type must share one class and encode a comparable image. Double
+                    // promotion is monotonic: distinct values may collide (ties fall through to the
+                    // comparator) but never invert.
                     case TINYINT:
-                        v = ((long) bytes[vs]) ^ Long.MIN_VALUE;
+                        v = doubleBits(bytes[vs]);
+                        cls = NUMERIC_CLASS;
                         break;
                     case SMALLINT:
-                        v = ((long) ((short) ((bytes[vs] << 8) | (bytes[vs + 1] & 0xff)))) ^ Long.MIN_VALUE;
+                        v = doubleBits((short) ((bytes[vs] << 8) | (bytes[vs + 1] & 0xff)));
+                        cls = NUMERIC_CLASS;
                         break;
                     case INTEGER:
+                        v = doubleBits(IntegerPointable.getInteger(bytes, vs));
+                        cls = NUMERIC_CLASS;
+                        break;
+                    case BIGINT:
+                        v = doubleBits(LongPointable.getLong(bytes, vs));
+                        cls = NUMERIC_CLASS;
+                        break;
+                    case FLOAT:
+                        v = doubleBits(Float.intBitsToFloat(IntegerPointable.getInteger(bytes, vs)));
+                        cls = NUMERIC_CLASS;
+                        break;
+                    case DOUBLE:
+                        v = doubleBits(Double.longBitsToDouble(LongPointable.getLong(bytes, vs)));
+                        cls = NUMERIC_CLASS;
+                        break;
+                    // ---- NON-NUMERIC: ordered against each other by RAW TAG BYTE ---------------
+                    case STRING:
+                        v = (((long) UTF8StringUtil.normalize(bytes, vs)) & 0xffffffffL) << 24;
+                        cls = tag & 0xff;
+                        break;
+                    case BOOLEAN:
+                        v = bytes[vs] != 0 ? 1L : 0L;
+                        cls = tag & 0xff;
+                        break;
                     case DATE:
                     case TIME:
                     case YEARMONTHDURATION:
-                        v = ((long) IntegerPointable.getInteger(bytes, vs)) ^ Long.MIN_VALUE;
+                        v = ((long) IntegerPointable.getInteger(bytes, vs)) ^ 0x80000000L;
+                        cls = tag & 0xff;
                         break;
-                    case BIGINT:
                     case DATETIME:
                     case DAYTIMEDURATION:
                         v = LongPointable.getLong(bytes, vs) ^ Long.MIN_VALUE;
+                        cls = tag & 0xff;
                         break;
-                    case FLOAT: {
-                        int f = IntegerPointable.getInteger(bytes, vs);
-                        // order-preserving transform for IEEE floats
-                        f = f >= 0 ? (f ^ Integer.MIN_VALUE) : ~f;
-                        v = ((long) f) << 32;
+                    case MISSING:
+                        v = 0;
+                        cls = 0; // MISSING sorts before everything
                         break;
-                    }
-                    case DOUBLE: {
-                        long d = LongPointable.getLong(bytes, vs);
-                        d = d >= 0 ? (d ^ Long.MIN_VALUE) : ~d;
-                        v = d;
-                        break;
-                    }
-                    case STRING: {
-                        int p = UTF8StringUtil.normalize(bytes, vs);
-                        v = (((long) p) & 0xffffffffL) << 32;
-                        break;
-                    }
-                    case BOOLEAN:
-                        v = (bytes[vs] != 0 ? 1L : 0L) ^ Long.MIN_VALUE;
+                    case NULL:
+                        v = 0;
+                        cls = 1; // NULL sorts after MISSING, before everything else
                         break;
                     default:
-                        // unknown/unsupported tag: emit a constant so every such value ties and the
-                        // comparator decides. Combined with the homogeneity check this stays sound.
-                        v = 0L;
+                        // Types whose RAW tag byte falls between the numeric tags (UINT8-64 = 5-8,
+                        // BINARY = 9, BITARRAY = 10) cannot be ordered correctly against the merged
+                        // numeric class, and unknown tags cannot be encoded at all. Refuse rather
+                        // than risk a wrong ordering.
+                        valid = false;
+                        v = 0;
+                        cls = tag & 0xff;
                         break;
                 }
+                // class in the top 8 bits, value image below it
+                long key = (((long) cls) << 56) | ((v >>> 8) & 0x00ffffffffffffffL);
                 if (!asc) {
-                    v = ~v;
+                    key = ~key;
                 }
                 if (w == 1) {
-                    keys[keyStart] = (int) (v >>> 32);
+                    keys[keyStart] = (int) (key >>> 32);
                 } else {
-                    keys[keyStart] = (int) (v >>> 32);
-                    keys[keyStart + 1] = (int) v;
+                    keys[keyStart] = (int) (key >>> 32);
+                    keys[keyStart + 1] = (int) key;
                 }
             }
 
