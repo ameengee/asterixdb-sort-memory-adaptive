@@ -39,6 +39,7 @@ if not mems:
     sys.exit(f"no samples parsed from {SRC}")
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.6))
+series = []
 print(f"{'arm':<16}" + "".join(f"{m:>9}" for m in mems) + f"{'slope':>9}{'n':>5}")
 for arm, label, color, marker, ls in ARMS:
     xs, med = [], []
@@ -55,6 +56,7 @@ for arm, label, color, marker, ls in ARMS:
     kw = dict(color=color, marker=marker, ls=ls, lw=2, ms=7 if marker != "*" else 11)
     ax1.plot(xs, med, label=label, **kw)
     ax2.plot(xs, [t / min(med) for t in med], label=label, **kw)
+    series.append((arm, label, color, marker, ls, xs, med))
 
 for ax, ylab, title in (
         (ax1, "Sort time (s), median", "What it costs"),
@@ -66,6 +68,25 @@ for ax, ylab, title in (
     ax.set_ylabel(ylab); ax.set_title(title)
     ax.grid(alpha=0.3, ls=":")
 ax2.axhline(1.0, color="black", lw=0.8, alpha=0.5)
+
+# The three fixed arms sit within ~0.6s of each other; on an axis that must also show stock at 9s
+# they collapse into one line. Inset them at their own scale so the comparison is actually visible.
+FAST = {"stock-typefix", "bucket-typefix", "bucket-best"}
+fast = [t for t in series if t[0] in FAST]
+if fast:
+    axin = ax1.inset_axes([0.46, 0.26, 0.51, 0.36])
+    for _, label, color, marker, ls, xs, med in fast:
+        axin.plot(xs, med, color=color, marker=marker, ls=ls, lw=1.6,
+                  ms=5 if marker != "*" else 8)
+    axin.set_xscale("log", base=2)
+    axin.set_xticks([mb(m) for m in mems])
+    axin.set_xticklabels([m.replace("MB", "") for m in mems], fontsize=7)
+    axin.tick_params(labelsize=7)
+    axin.grid(alpha=0.3, ls=":")
+    axin.set_title("arms 4-6, zoomed", fontsize=8, pad=3)
+    axin.patch.set_alpha(0.95)
+    for sp in axin.spines.values():
+        sp.set_alpha(0.4)
 ax1.legend(frameon=False, fontsize=8.5, loc="upper left")
 fig.suptitle("10M-row external sort: stock's U-curve, and what removes it", fontsize=12, y=0.99)
 fig.tight_layout()
