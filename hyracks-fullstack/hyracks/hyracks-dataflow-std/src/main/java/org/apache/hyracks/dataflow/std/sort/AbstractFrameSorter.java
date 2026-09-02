@@ -129,6 +129,14 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     // them -- which for this sorter means re-sorting the whole run with the comparator alone, since
     // buckets are sorted during accumulation.
     private boolean nkUsable = true;
+    // [runtime decisiveness] A compile-time-indecisive normalizer can still turn out to have
+    // produced injective keys -- an auto-detecting one does exactly that whenever the column is
+    // homogeneous and its values fit the key. When that holds, equal normalized keys already prove
+    // the tuples are equal, so compare() may return 0 without dereferencing tuple bytes. This
+    // matters because the duplicate rate WITHIN a run grows with the run size: a large budget puts
+    // many equal keys in the same run, and each one would otherwise cost a random-access comparator
+    // call. Recomputed at every sort entry point, never cached across inserts.
+    private boolean runtimeDecisive;
     private long phMoves; // tuple-slot moves (each is ptrSize ints)
     private long phCompares; // calls to compare()
     // Coverage check: span must equal gap + insert + sortCall + residual. A large residual means a
@@ -280,6 +288,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         this.currentBucketBytes = 0;
         this.currentBucketTuples = 0;
         this.nkUsable = true;
+        this.runtimeDecisive = false;
         this.numBuckets = 0;
         this.sortedFrameCount = 0;
         // phase counters are per-run: clear them so each run reports its own timeline
@@ -374,15 +383,16 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     @Override
     public void sort() throws HyracksDataException {
         long tSortCall0 = PHASE_LOG ? System.nanoTime() : 0;
+        refreshRuntimeDecisive();
         // [ADDED for memory-adaptive sort] original AsterixDB sort() had NO logging block
         if (LOGGER.isInfoEnabled()) {
             long fillPct = (maxSortMemory > 0 && maxSortMemory != Long.MAX_VALUE)
                     ? (100L * totalMemoryUsed / maxSortMemory) : -1;
             LOGGER.warn(
                     "adaptive-sort-run: framesLoaded={} bytesUsed={} budgetBytes={} fillPct={} tuples={} "
-                            + "mergeFanIn={} bucketTargetBytes={}",
+                            + "mergeFanIn={} bucketTargetBytes={} runtimeDecisive={}",
                     getFrameCount(), totalMemoryUsed, maxSortMemory, fillPct, tupleCount, mergeFanIn,
-                    bucketTargetBytes);
+                    bucketTargetBytes, runtimeDecisive);
         }
         // ORIGINAL sort(): build ONE tPointers array over ALL frames, then sort the whole thing in one pass.
         // Now, pointers are built incrementally in insertFrame and full buckets are already sorted.
@@ -454,6 +464,12 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
             }
             if (nkUsable && !nkcs[0].isKeyValid()) {
                 nkUsable = false; // column turned out to be heterogeneous
+                // Log HERE, at the moment the key is abandoned. The re-sort path below also logs,
+                // but only when buckets were already sealed (numBuckets > 0); a sort small enough
+                // to sit in one unsealed bucket would fall back correctly and silently, which made
+                // the invalidation look like it never happened.
+                LOGGER.warn("adaptive-sort: normalized key abandoned at tuple {} (heterogeneous "
+                        + "sort column); ordering falls back to the comparator", builtTuples);
             }
             int keyPos = ptr * ptrSize + ID_NORMALIZED_KEY;
             for (int k = 0; k < nkcs.length; k++) {
@@ -671,6 +687,9 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         if (length <= 1) {
             return;
         }
+        // Buckets are sorted incrementally, mid-insert, so a later tuple can still invalidate the
+        // key or make it inexact. Re-derive per bucket rather than trusting an earlier answer.
+        refreshRuntimeDecisive();
         // NOTE (2026-08-30): an attempt to remove the trailing copy-back -- insertion-sort small
         // blocks in place, then pick a block size making the merge pass count even -- measured 3.6%
         // SLOWER than this version (20.84s vs 20.11s at 512MB). Insertion sort shifts elements with
@@ -843,6 +862,17 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         return true;
     }
 
+    /**
+     * Re-derive {@link #runtimeDecisive}. Safe only at a sort entry point: inserting more tuples can
+     * invalidate the key (a new type tag) or make it inexact, so this must never be cached across
+     * inserts. Requires a single sort column -- with more, equal first keys say nothing about the
+     * remaining ones.
+     */
+    private void refreshRuntimeDecisive() {
+        runtimeDecisive = nkcs != null && nkUsable && nkcs.length == 1 && comparators.length == 1
+                && nkcs[0].isKeyExact();
+    }
+
     protected final int compare(int tp1, int tp2) throws HyracksDataException {
         return compare(tPointers, tp1, tPointers, tp2);
     }
@@ -855,7 +885,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
             int cmpNormalizedKey =
                     NormalizedKeyUtils.compareNormalizeKeys(tPointers1, tp1 * ptrSize + ID_NORMALIZED_KEY, tPointers2,
                             tp2 * ptrSize + ID_NORMALIZED_KEY, normalizedKeyTotalLength);
-            if (cmpNormalizedKey != 0 || normalizedKeysDecisive) {
+            if (cmpNormalizedKey != 0 || normalizedKeysDecisive || runtimeDecisive) {
                 return cmpNormalizedKey;
             }
         }

@@ -19,6 +19,11 @@ ASM="$REPO_ROOT/asterixdb/asterix-server/target/asterix-server-0.9.10-SNAPSHOT-b
 CLUSTER="$ASM/opt/local"
 JARREPO="$ASM/repo"
 JAR="$REPO_ROOT/hyracks-fullstack/hyracks/hyracks-dataflow-std/target/hyracks-dataflow-std-0.3.10-SNAPSHOT.jar"
+# asterix-om carries the normalized-key PROVIDER and the auto-detecting key computer. deploy.sh
+# historically swapped only hyracks-dataflow-std, so a change to either of those silently did not
+# reach the cluster -- the assembly kept serving its stale om jar.
+OM_JAR="$REPO_ROOT/asterixdb/asterix-om/target/asterix-om-0.9.10-SNAPSHOT.jar"
+OM_JAR_OVERRIDE=""
 # macOS default; on Linux set JAVA_HOME in the environment (the assembly needs JDK 21+).
 if [[ -z "${JAVA_HOME:-}" && -d /opt/homebrew/opt/openjdk ]]; then
   export JAVA_HOME=/opt/homebrew/opt/openjdk
@@ -27,7 +32,7 @@ fi
 BROKER=random; PERIOD=10; ACTION=reclaim; FRACTION=0.5
 VICTIM_PROB=0.3; SEED=0; DISTRIBUTION=normal; MEAN=0.5; STDDEV=0.15; DF=5
 SCRIPT_PATH=""; BUCKET_BYTES=262144; MERGE_FAN_IN=2; PARTIAL_SPILL=true
-VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false; CAPMULT=4; BUCKET_TUPLES=0; AUTOKEY=false; AUTOKEYINTS=2
+VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false; CAPMULT=4; BUCKET_TUPLES=0; AUTOKEY=false; AUTOKEYINTS=3
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,6 +59,7 @@ while [[ $# -gt 0 ]]; do
     --cap-mult) CAPMULT="$2"; shift 2;;
     --bucket-tuples) BUCKET_TUPLES="$2"; shift 2;;
     --auto-type-key) AUTOKEY="$2"; shift 2;;
+    --om-jar) OM_JAR_OVERRIDE="$2"; shift 2;;
     --auto-key-ints) AUTOKEYINTS="$2"; shift 2;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
@@ -104,6 +110,27 @@ elif [[ $BUILD -eq 1 ]]; then
   cp "$JAR" "$JARREPO/hyracks-dataflow-std-0.3.10-SNAPSHOT.jar"
   echo "[deploy] jar deployed: $(ls -l "$JARREPO/hyracks-dataflow-std-0.3.10-SNAPSHOT.jar" | awk '{print $6,$7,$8}')"
 fi
+
+# Every module we modify must be deployed, not just hyracks-dataflow-std. Missing one fails in
+# the worst possible way: the cluster starts, reports ACTIVE, then dies mid-query with
+# NoSuchMethodError -- or, if the signatures happen to line up, silently runs the OLD code and
+# produces plausible numbers for the wrong build. Verify each by md5.
+EXTRA_JARS=(
+  "$REPO_ROOT/hyracks-fullstack/hyracks/hyracks-api/target/hyracks-api-0.3.10-SNAPSHOT.jar|hyracks-api-0.3.10-SNAPSHOT.jar"
+  "${OM_JAR_OVERRIDE:-$OM_JAR}|asterix-om-0.9.10-SNAPSHOT.jar"
+)
+for ENTRY in "${EXTRA_JARS[@]}"; do
+  SRC="${ENTRY%%|*}"; DST="${ENTRY##*|}"
+  if [[ ! -f "$SRC" ]]; then
+    echo "[deploy] ERROR: jar not found at $SRC" >&2; exit 1
+  fi
+  cp "$SRC" "$JARREPO/$DST"
+  W=$(md5sum "$SRC" | cut -d" " -f1); G=$(md5sum "$JARREPO/$DST" | cut -d" " -f1)
+  if [[ "$W" != "$G" ]]; then
+    echo "[deploy] ERROR: deployed $DST md5 $G != requested $W" >&2; exit 1
+  fi
+  echo "[deploy] $DST verified: md5 $G"
+done
 
 # Rewrite the [nc] section's jvm.args line (adding it if absent).
 CONF="$CLUSTER/conf/cc.conf"

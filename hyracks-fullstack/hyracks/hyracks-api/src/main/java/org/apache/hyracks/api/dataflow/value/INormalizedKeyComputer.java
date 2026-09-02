@@ -38,4 +38,22 @@ public interface INormalizedKeyComputer {
     default boolean isKeyValid() {
         return true;
     }
+
+    /**
+     * Whether every key produced so far is an INJECTIVE image of its value: equal keys imply equal
+     * values, so a caller may return "equal" without consulting the binary comparator.
+     * <p>
+     * This is the runtime counterpart of {@link INormalizedKeyProperties#isDecisive()}. A static
+     * normalizer knows its column's type at compile time and can declare decisiveness up front. A
+     * runtime-type-detecting normalizer cannot -- it may yet meet a second type, and its fixed-width
+     * key may truncate wide values -- so it declares {@code isDecisive() == false} and instead
+     * reports here, after the fact, whether the keys it actually produced happen to be exact.
+     * <p>
+     * Only meaningful together with {@link #isKeyValid()}: an invalid key is never exact. The
+     * default is {@code false} so that no existing normalizer accidentally opts in; static
+     * normalizers gain nothing from it, since {@code isDecisive()} already covers them.
+     */
+    default boolean isKeyExact() {
+        return false;
+    }
 }

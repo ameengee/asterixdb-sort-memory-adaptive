@@ -44,7 +44,11 @@ public class NormalizedKeyComputerFactoryProvider implements INormalizedKeyCompu
     }
 
     private static int autoKeyInts() {
-        return Integer.getInteger("asterix.sort.autoKeyInts", 2);
+        // 3 ints (class word + full 64-bit value) is the only width that can be EXACT, which is
+        // what lets the sorter skip the comparator on equal keys. 2 ints packs the class into the
+        // value's top byte and truncates, so it is ordered but never injective. Set 1 or 2 to trade
+        // that away for a narrower pointer array.
+        return Integer.getInteger("asterix.sort.autoKeyInts", 3);
     }
 
     @Override

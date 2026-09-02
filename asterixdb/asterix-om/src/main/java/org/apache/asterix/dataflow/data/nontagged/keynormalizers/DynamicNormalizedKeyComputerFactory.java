@@ -72,12 +72,12 @@ public class DynamicNormalizedKeyComputerFactory implements INormalizedKeyComput
     }
 
     private static final long serialVersionUID = 1L;
-    /** ints per key; 1 or 2. */
+    /** ints per key; 1, 2, or 3. Only width 3 can be exact (see {@code isKeyExact}). */
     private final int width;
     private final boolean ascending;
 
     public DynamicNormalizedKeyComputerFactory(int width, boolean ascending) {
-        this.width = width < 2 ? 1 : 2;
+        this.width = width < 2 ? 1 : (width > 2 ? 3 : 2);
         this.ascending = ascending;
     }
 
@@ -112,6 +112,11 @@ public class DynamicNormalizedKeyComputerFactory implements INormalizedKeyComput
         final boolean asc = ascending;
         return new INormalizedKeyComputer() {
             private boolean valid = true;
+            // Every key so far is an injective image of its value. Width 1 and 2 truncate the
+            // value to make room for the ordering class, so they can never be exact; width 3
+            // stores the class and the full 64-bit image in separate words and can be. Per-type
+            // exceptions (a 4-byte string prefix, an int64 too large for a double) clear this.
+            private boolean exact = (w == 3);
 
             @Override
             public void normalize(byte[] bytes, int start, int length, int[] keys, int keyStart) {
@@ -138,10 +143,19 @@ public class DynamicNormalizedKeyComputerFactory implements INormalizedKeyComput
                         v = doubleBits(IntegerPointable.getInteger(bytes, vs));
                         cls = NUMERIC_CLASS;
                         break;
-                    case BIGINT:
-                        v = doubleBits(LongPointable.getLong(bytes, vs));
+                    case BIGINT: {
+                        long raw = LongPointable.getLong(bytes, vs);
+                        // Numerics share one class and must therefore share the double image, but a
+                        // double represents integers exactly only up to 2^53. Beyond that two
+                        // distinct int64s can collide, so the key stays correctly ORDERED but stops
+                        // being injective -- and equal keys may no longer mean equal values.
+                        if (raw > (1L << 53) || raw < -(1L << 53)) {
+                            exact = false;
+                        }
+                        v = doubleBits(raw);
                         cls = NUMERIC_CLASS;
                         break;
+                    }
                     case FLOAT:
                         v = doubleBits(Float.intBitsToFloat(IntegerPointable.getInteger(bytes, vs)));
                         cls = NUMERIC_CLASS;
@@ -152,6 +166,9 @@ public class DynamicNormalizedKeyComputerFactory implements INormalizedKeyComput
                         break;
                     // ---- NON-NUMERIC: ordered against each other by RAW TAG BYTE ---------------
                     case STRING:
+                        // Only a 4-byte prefix of the string: distinct strings sharing a prefix
+                        // collide, so string keys are ordered but never injective.
+                        exact = false;
                         v = (((long) UTF8StringUtil.normalize(bytes, vs)) & 0xffffffffL) << 24;
                         cls = tag & 0xff;
                         break;
@@ -184,11 +201,28 @@ public class DynamicNormalizedKeyComputerFactory implements INormalizedKeyComput
                         // numeric class, and unknown tags cannot be encoded at all. Refuse rather
                         // than risk a wrong ordering.
                         valid = false;
+                        exact = false;
                         v = 0;
                         cls = tag & 0xff;
                         break;
                 }
-                // class in the top 8 bits, value image below it
+                if (w == 3) {
+                    // Exact form: the ordering class gets a word of its own, so the value keeps all
+                    // 64 bits instead of surrendering 8 to the class. Keys are compared word by word
+                    // as UNSIGNED ints, so (class, valueHigh, valueLow) orders by class first and by
+                    // value within a class -- and inverting every word reverses that order exactly.
+                    int k0 = cls, k1 = (int) (v >>> 32), k2 = (int) v;
+                    if (!asc) {
+                        k0 = ~k0;
+                        k1 = ~k1;
+                        k2 = ~k2;
+                    }
+                    keys[keyStart] = k0;
+                    keys[keyStart + 1] = k1;
+                    keys[keyStart + 2] = k2;
+                    return;
+                }
+                // Narrow forms: class in the top 8 bits, truncated value image below it. Never exact.
                 long key = (((long) cls) << 56) | ((v >>> 8) & 0x00ffffffffffffffL);
                 if (!asc) {
                     key = ~key;
@@ -209,6 +243,11 @@ public class DynamicNormalizedKeyComputerFactory implements INormalizedKeyComput
             @Override
             public boolean isKeyValid() {
                 return valid;
+            }
+
+            @Override
+            public boolean isKeyExact() {
+                return valid && exact;
             }
         };
     }
