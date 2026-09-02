@@ -25,8 +25,11 @@ M = ["32MB", "128MB", "512MB", "2048MB"]
 def mb(m): return int(m.replace("MB", ""))
 xs = [mb(m) for m in M]
 
-SERIES = [("stock-nullable", "Stock AsterixDB", "#b91c1c", "o", "-"),
-          ("ours-nullable",  "Ours (auto-detected key)", "#1d4ed8", "D", "-")]
+# The control matters: it shows the gap is caused by the DECLARATION, not by anything else about
+# the data. Same 23 columns, same 28,800,991 rows, only `?` removed and nulls coalesced.
+SERIES = [("stock-nullable", "Stock, official schema (double?)", "#b91c1c", "o", "-"),
+          ("stock-nonnull",  "Stock, same data declared non-nullable", "#0f766e", "s", "--"),
+          ("ours-nullable",  "Ours, official schema (auto-detected)", "#1d4ed8", "D", "-")]
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13.5, 5.4))
 meds = {}
@@ -41,12 +44,21 @@ for arm, label, color, marker, ls in SERIES:
     ax1.plot(xs, med, color=color, marker=marker, ls=ls, lw=2.2, ms=8, label=label)
     ax1.fill_between(xs, lo, hi, color=color, alpha=0.15, lw=0)
     ax2.plot(xs, [v/med[0] for v in med], color=color, marker=marker, ls=ls, lw=2.2, ms=8, label=label)
-    for x, v in zip(xs, med):
-        ax1.annotate(f"{v:.1f}s", (x, v), textcoords="offset points", xytext=(0, 10 if arm.startswith("ours") else 10),
-                     ha="center", fontsize=8, color=color)
+
+
+# Value labels, stacked per budget in ascending order: the control and our line sit within ~0.5s of
+# each other, so a fixed offset prints them on top of one another.
+COLORS = {a: c for a, _, c, _, _ in SERIES}
+for xi, m in enumerate(M):
+    col = sorted(((meds[a][xi], COLORS[a]) for a in meds), key=lambda t: t[0])
+    for rank, (val, color) in enumerate(col):
+        dy = -16 if rank == 0 else 8 + 12 * (rank - 1)
+        ax1.annotate(f"{val:.1f}s", (xs[xi], val), textcoords="offset points", xytext=(0, dy),
+                     ha="center", fontsize=8, color=color,
+                     bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.8))
 
 # speedup annotations between the two curves
-if len(meds) == 2:
+if "stock-nullable" in meds and "ours-nullable" in meds:
     for x, a, b in zip(xs, meds["stock-nullable"], meds["ours-nullable"]):
         ax1.annotate(f"{a/b:.2f}x", (x, (a+b)/2), ha="center", fontsize=9.5,
                      color="#374151", fontweight="bold",
@@ -63,7 +75,7 @@ for ax in (ax1, ax2):
 ax1.legend(frameon=False, fontsize=9.5)
 ax1.margins(y=0.18); ax2.margins(y=0.12)
 fig.suptitle("TPC-DS store_sales (28.8M rows), ORDER BY ss_sales_price\n"
-             "AsterixDB's own shipped schema declares this column double? -- so stock sorts it with no normalized key",
+             "One `?` in AsterixDB's own shipped schema costs stock 1.57-2.05x; auto-detection recovers it to within 3%",
              fontsize=11.5, y=1.0)
 fig.tight_layout()
 fig.savefig(DST, dpi=160, bbox_inches="tight")

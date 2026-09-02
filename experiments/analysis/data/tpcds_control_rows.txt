@@ -1,0 +1,1 @@
+tpcdsnn2 rows=28800991 (tpcds=28800991)
