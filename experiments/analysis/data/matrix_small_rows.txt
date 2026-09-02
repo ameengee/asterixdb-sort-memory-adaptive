@@ -1,0 +1,3 @@
+test rows=10000000
+typed rows=10000000
+mixbig rows=10000000
