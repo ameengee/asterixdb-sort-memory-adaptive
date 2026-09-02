@@ -41,15 +41,27 @@ AUTO   = ("Auto-detected type", "#1d4ed8", "D", "-")
 
 def lineplot(fname, title, subtitle, series, impossible=None, ratio_to=None):
     """series: list of (label, color, marker, ls, medians)."""
-    fig, ax = plt.subplots(figsize=(7.4, 5.0))
+    fig, ax = plt.subplots(figsize=(8.6, 5.4))
+    plotted = []
     for label, color, marker, ls, ys in series:
         if ys is None: continue
         y = [a / b for a, b in zip(ys, ratio_to)] if ratio_to else ys
         ax.plot([mb(m) for m in mems], y, label=label, color=color, marker=marker,
                 ls=ls, lw=2, ms=7)
+        plotted.append((color, y))
         pct = (y[-1] / y[0] - 1) * 100
         print(f"    {label:<22} " + "  ".join(f"{m}={v:.2f}" for m, v in zip(mems, y))
               + f"   slope={pct:+.1f}%")
+    fmt = (lambda v: f"{v:.3f}") if ratio_to else (lambda v: f"{v:.2f}")
+    for xi, m in enumerate(mems):
+        col = sorted(((yv[xi], c) for c, yv in plotted), key=lambda t: t[0])
+        for rank, (yval, color) in enumerate(col):
+            # lowest label below the point, the rest stacked upward at widening offsets
+            dy = -15 if rank == 0 else 9 + 13 * (rank - 1)
+            ax.annotate(fmt(yval), (mb(m), yval), textcoords="offset points",
+                        xytext=(0, dy), ha="center", fontsize=7.5, color=color,
+                        bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="none", alpha=0.75))
+    ax.margins(y=0.16)
     if ratio_to:
         ax.axhline(1.0, color="black", lw=1.0, alpha=0.6)
         ax.set_ylabel("Time relative to stock (1.0 = parity)")
