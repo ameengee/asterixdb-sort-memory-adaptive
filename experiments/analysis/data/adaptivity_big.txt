@@ -10,3 +10,14 @@ AD 1 reclaim-full 512MB 197.062155
 AD 1 reclaim-full 512MB 193.468221
 AD 1 reclaim-full 2048MB 190.937059
 AD 1 reclaim-full 2048MB 193.919590
+AD 2 no-pressure 512MB 135.573678
+AD 2 no-pressure 512MB 141.015764
+AD 2 no-pressure 2048MB 146.518200
+AD 2 no-pressure 2048MB 150.262882
+AD 2 reclaim-partial 512MB 198.416788
+AD 2 reclaim-partial 512MB 194.098031
+AD 2 reclaim-partial 2048MB 194.903420
+AD 2 reclaim-partial 2048MB 190.651873
+AD 2 reclaim-full 512MB 197.972352
+AD 2 reclaim-full 512MB 202.712606
+AD 2 reclaim-full 2048MB 188.655179
