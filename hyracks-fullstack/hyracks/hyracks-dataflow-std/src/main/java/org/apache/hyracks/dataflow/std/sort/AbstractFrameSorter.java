@@ -161,6 +161,15 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     // 0 disables scaling and pins the target to BUCKET_TARGET_BYTES.
     private static final int BUCKET_COUNT_TARGET = Integer.getInteger("hyracks.sort.bucketCountTarget", 256);
 
+    // [memory release] Lowering the budget does NOT free anything on its own: the operator stops
+    // using frames it still holds, but they stay charged to this task and no other query can take
+    // them -- verified by tracing every path from a broker reclaim (setMaxSortMemory sets a field;
+    // the spill path's reset() keeps every buffer; deAllocateFrame is only reached from frame
+    // merging). This gate makes a shrink actually hand memory back. Off by default: it changes
+    // allocation behaviour, so it is opt-in until measured.
+    private static final boolean RELEASE_ON_SHRINK =
+            Boolean.parseBoolean(System.getProperty("hyracks.sort.releaseOnShrink", "false"));
+
     // [type-cut buckets] Close the current bucket when the sort column's TYPE changes, so every
     // bucket holds one type. This matters because a runtime-detecting key cannot be exact over a
     // mixed column -- a string key is a 4-byte prefix, so equal keys do not imply equal values and
@@ -290,8 +299,19 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     // Change the in-memory budget gate (checked first in insertFrame) so the budget can move at runtime.
     @Override
     public void setMaxSortMemory(long maxSortMemory) {
+        long previous = this.maxSortMemory;
         this.maxSortMemory = maxSortMemory;
         applyBucketingPolicy();
+        if (RELEASE_ON_SHRINK && maxSortMemory < previous) {
+            // Only FREE frames are released, so this is safe at any point -- but it only has
+            // something to give back after a spill, which is exactly when the run generator lowers
+            // the budget. Anything still holding live tuples is left alone.
+            long freed = bufferManager.shrinkTo(maxSortMemory);
+            if (freed > 0 && LOGGER.isInfoEnabled()) {
+                LOGGER.warn("adaptive-sort: released {} bytes back to the frame manager " + "(budget {} -> {})", freed,
+                        previous, maxSortMemory);
+            }
+        }
     }
 
     /**

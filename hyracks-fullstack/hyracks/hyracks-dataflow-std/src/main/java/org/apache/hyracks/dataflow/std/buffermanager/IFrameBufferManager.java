@@ -59,4 +59,13 @@ public interface IFrameBufferManager {
      */
     void close();
 
+    /**
+     * Return free memory to the frame manager so other operators can use it, keeping at most
+     * {@code targetBytes} allocated. Default is a no-op for managers that do not pool frames.
+     *
+     * @return bytes released
+     */
+    default long shrinkTo(long targetBytes) {
+        return 0;
+    }
 }

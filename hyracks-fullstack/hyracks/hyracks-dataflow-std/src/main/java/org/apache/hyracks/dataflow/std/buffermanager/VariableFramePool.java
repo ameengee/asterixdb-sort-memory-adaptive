@@ -170,6 +170,24 @@ public class VariableFramePool implements IFramePool {
     }
 
     @Override
+    public long shrinkTo(long targetBytes) {
+        if (targetBytes < 0) {
+            return 0;
+        }
+        long released = 0;
+        // Free slots are kept sorted ascending by size, so walking backwards releases the largest
+        // first and reaches the target with the fewest deallocations. `used` marks a slot that is
+        // either handed out or already a merged-away hole; both must be skipped.
+        for (int i = buffers.size() - 1; i >= 0 && allocateMem > targetBytes; i--) {
+            if (used.get(i) || buffers.get(i) == null) {
+                continue;
+            }
+            released += deAllocateFrame(i);
+        }
+        return released;
+    }
+
+    @Override
     public void reset() {
         removeEmptySpot(buffers);
         Collections.sort(buffers, sizeByteBufferComparator);

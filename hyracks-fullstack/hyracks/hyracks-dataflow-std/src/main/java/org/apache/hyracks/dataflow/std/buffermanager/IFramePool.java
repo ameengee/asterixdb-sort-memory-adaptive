@@ -47,6 +47,21 @@ public interface IFramePool {
     /**
      * Release the pre-allocated resources.
      */
+    /**
+     * Release FREE frames until at most {@code targetBytes} remain allocated, returning the bytes
+     * actually handed back to the frame manager.
+     * <p>
+     * Lowering a sort's budget does not by itself free anything: the operator simply stops using
+     * frames it still holds, so the memory stays charged to this task and no other query can take
+     * it. This is the call that actually returns it. Frames still IN USE are never touched -- they
+     * hold live tuples, and releasing one would corrupt the sort silently.
+     *
+     * @return bytes released; 0 if nothing could be freed
+     */
+    default long shrinkTo(long targetBytes) {
+        return 0;
+    }
+
     void close();
 
 }

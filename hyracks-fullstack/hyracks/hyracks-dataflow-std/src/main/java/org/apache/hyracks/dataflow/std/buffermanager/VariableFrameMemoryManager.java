@@ -76,6 +76,11 @@ public class VariableFrameMemoryManager implements IFrameBufferManager {
     }
 
     @Override
+    public long shrinkTo(long targetBytes) {
+        return framePool.shrinkTo(targetBytes);
+    }
+
+    @Override
     public void reset() throws HyracksDataException {
         numPhysicalFrames = 0;
         numLogicalFrames = 0;
