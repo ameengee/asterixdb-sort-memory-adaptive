@@ -150,6 +150,16 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     //   a huge value      no bucket ever seals during accumulation, so sort() does ONE big sort at
     //                     flush -- i.e. Stage 1 disabled, the stock-sorter baseline in-build.
     private static final long BUCKET_TARGET_BYTES = Long.getLong("hyracks.sort.bucketTargetBytes", 256L * 1024);
+    // [measured 2026-09-01] A CONSTANT bucket target makes the bucket COUNT grow with the budget,
+    // and the cascade then costs more per tuple: +12-18% at 320MB-2GB. The fix is to bound the
+    // count, not to abandon bucketing -- the sweep showed coarse buckets (>=64k tuples) run at
+    // 4.22-4.31s versus 4.28s with bucketing off, i.e. free. Keeping buckets matters because
+    // sealing is what makes the rest of the design work: getSortedTupleCount() only advances on a
+    // seal, so with no buckets Stage 2's cheap shrink (spill the sorted prefix, keep the unsorted
+    // tail) degenerates to a stock full flush -- precisely at the large budgets where a broker is
+    // most likely to reclaim. Sealing is also what interleaves sort work with arrival (fig. 1).
+    // 0 disables scaling and pins the target to BUCKET_TARGET_BYTES.
+    private static final int BUCKET_COUNT_TARGET = Integer.getInteger("hyracks.sort.bucketCountTarget", 256);
     private long bucketTargetBytes = BUCKET_TARGET_BYTES;
     // [U-curve investigation] Seal a bucket after this many TUPLES, if > 0 (0 = use the byte target).
     // Total slot moves for bucket-sort + one k-way merge is about N*(log2(bucketTuples) + 1), so the
@@ -194,6 +204,10 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         } else {
             this.maxSortMemory = (long) ctx.getInitialFrameSize() * maxSortFrames;
         }
+        // The budget is also set here, not only through setMaxSortMemory, so the bucketing policy
+        // has to be applied for the FIRST run too -- otherwise a large compile-time budget would
+        // still bucket until the broker happened to move the budget.
+        applyBucketingPolicy();
         this.sortFields = sortFields;
 
         int runningNormalizedKeyTotalLength = 0;
@@ -256,6 +270,22 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     @Override
     public void setMaxSortMemory(long maxSortMemory) {
         this.maxSortMemory = maxSortMemory;
+        applyBucketingPolicy();
+    }
+
+    /**
+     * Size buckets so their COUNT per run stays roughly constant as the budget changes, instead of
+     * letting a fixed byte target multiply buckets without limit. Re-evaluated on every budget
+     * change, because the budget moves at runtime.
+     */
+    private void applyBucketingPolicy() {
+        if (BUCKET_COUNT_TARGET <= 0 || maxSortMemory <= 0 || maxSortMemory == Long.MAX_VALUE) {
+            bucketTargetBytes = BUCKET_TARGET_BYTES;
+            return;
+        }
+        // Grow the bucket with the budget so the count stays near BUCKET_COUNT_TARGET, but never
+        // shrink below the cache-sized floor -- a small budget should still get cache-sized buckets.
+        bucketTargetBytes = Math.max(BUCKET_TARGET_BYTES, maxSortMemory / BUCKET_COUNT_TARGET);
     }
 
     // [ADDED for memory-adaptive sort] bytes currently held by this run (used-vs-budget decisions).
