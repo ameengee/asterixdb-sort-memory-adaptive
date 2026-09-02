@@ -1,0 +1,60 @@
+CFG B big 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG B big 32MB bucketTargetBytes=262144 runtimeDecisive=true
+CFG B big 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG B big 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+CFG B big 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG B big 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+CFG B bigmixed 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG B bigmixed 32MB bucketTargetBytes=262144 runtimeDecisive=false
+CFG B bigmixed 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG B bigmixed 512MB bucketTargetBytes=2097024 runtimeDecisive=false
+CFG B bigmixed 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG B bigmixed 2048MB bucketTargetBytes=8388480 runtimeDecisive=false
+CFG C big 32MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+CFG C big 32MB bucketTargetBytes=262144 runtimeDecisive=false
+CFG C big 512MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+CFG C big 512MB bucketTargetBytes=2097024 runtimeDecisive=false
+CFG C big 2048MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+CFG C big 2048MB bucketTargetBytes=8388480 runtimeDecisive=false
+CFG C bigtyped 32MB adaptive-sort-keys: ptrSize=5 nkcs=1 nkTotalLen=2 decisive=true comparators=1
+CFG C bigtyped 32MB bucketTargetBytes=262144 runtimeDecisive=false
+CFG C bigtyped 512MB adaptive-sort-keys: ptrSize=5 nkcs=1 nkTotalLen=2 decisive=true comparators=1
+CFG C bigtyped 512MB bucketTargetBytes=2097024 runtimeDecisive=false
+CFG C bigtyped 2048MB adaptive-sort-keys: ptrSize=5 nkcs=1 nkTotalLen=2 decisive=true comparators=1
+CFG C bigtyped 2048MB bucketTargetBytes=8388480 runtimeDecisive=false
+CFG C bigmixed 32MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+CFG C bigmixed 32MB bucketTargetBytes=262144 runtimeDecisive=false
+CFG C bigmixed 512MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+CFG C bigmixed 512MB bucketTargetBytes=2097024 runtimeDecisive=false
+CFG C bigmixed 2048MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+CFG C bigmixed 2048MB bucketTargetBytes=8388480 runtimeDecisive=false
+CFG D big 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG D big 32MB bucketTargetBytes=262144 runtimeDecisive=true
+CFG D big 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG D big 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+CFG D big 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG D big 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+CFG D bigmixed 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG D bigmixed 32MB bucketTargetBytes=262144 runtimeDecisive=false
+CFG D bigmixed 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG D bigmixed 512MB bucketTargetBytes=2097024 runtimeDecisive=false
+CFG D bigmixed 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG D bigmixed 2048MB bucketTargetBytes=8388480 runtimeDecisive=false
+CFG E big 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG E big 32MB bucketTargetBytes=262144 runtimeDecisive=true
+CFG E big 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG E big 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+CFG E big 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG E big 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+CFG E bigtyped 32MB adaptive-sort-keys: ptrSize=5 nkcs=1 nkTotalLen=2 decisive=true comparators=1
+CFG E bigtyped 32MB bucketTargetBytes=262144 runtimeDecisive=false
+CFG E bigtyped 512MB adaptive-sort-keys: ptrSize=5 nkcs=1 nkTotalLen=2 decisive=true comparators=1
+CFG E bigtyped 512MB bucketTargetBytes=2097024 runtimeDecisive=false
+CFG E bigtyped 2048MB adaptive-sort-keys: ptrSize=5 nkcs=1 nkTotalLen=2 decisive=true comparators=1
+CFG E bigtyped 2048MB bucketTargetBytes=8388480 runtimeDecisive=false
+CFG E bigmixed 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG E bigmixed 32MB bucketTargetBytes=262144 runtimeDecisive=false
+CFG E bigmixed 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG E bigmixed 512MB bucketTargetBytes=2097024 runtimeDecisive=false
+CFG E bigmixed 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+CFG E bigmixed 2048MB bucketTargetBytes=8388480 runtimeDecisive=false
