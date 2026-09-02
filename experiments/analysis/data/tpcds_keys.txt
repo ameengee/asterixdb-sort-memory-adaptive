@@ -1,0 +1,4 @@
+KEY ours-nullable 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+KEY ours-nullable 128MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+KEY ours-nullable 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+KEY ours-nullable 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1

@@ -1,0 +1,16 @@
+SPREAD bucketed 128MB sortEvents=67	spreadPct=82
+SPREAD bucketed 128MB sortEvents=67	spreadPct=87
+SPREAD bucketed 128MB sortEvents=29	spreadPct=88
+SPREAD bucketed 128MB sortEvents=67	spreadPct=88
+SPREAD bucketed 128MB sortEvents=67	spreadPct=87
+SPREAD bucketed 128MB sortEvents=29	spreadPct=88
+SPREAD bucketed 512MB sortEvents=41	spreadPct=87
+SPREAD bucketed 512MB sortEvents=41	spreadPct=86
+SPREAD flat 128MB sortEvents=1	spreadPct=0
+SPREAD flat 128MB sortEvents=1	spreadPct=0
+SPREAD flat 128MB sortEvents=1	spreadPct=0
+SPREAD flat 128MB sortEvents=1	spreadPct=0
+SPREAD flat 128MB sortEvents=1	spreadPct=0
+SPREAD flat 128MB sortEvents=1	spreadPct=0
+SPREAD flat 512MB sortEvents=1	spreadPct=0
+SPREAD flat 512MB sortEvents=1	spreadPct=0

@@ -17,13 +17,15 @@ export REPO_ROOT=~/Ameen/asterixdb JARDIR=~/Ameen/jars
 export JAVA_HOME=${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk-amd64}
 CL=$REPO_ROOT/asterixdb/asterix-server/target/asterix-server-0.9.10-SNAPSHOT-binary-assembly/apache-asterixdb-0.9.10-SNAPSHOT/opt/local
 Q=http://127.0.0.1:19002/query/service
-OUT=~/Ameen/adaptivity; mkdir -p $OUT
+DV=${DV:-test}
+TAG=${TAG:-small}
+OUT=~/Ameen/adaptivity-$TAG; mkdir -p $OUT
 MEMS=${MEMS:-"128MB 512MB"}; ROUNDS=${ROUNDS:-3}; REPS=${REPS:-3}
 NOBUCKET=2000000000
 
-echo RUNNING > ~/Ameen/adaptivity.status
-beat(){ echo "$(date +%H:%M:%S) $1" > ~/Ameen/adaptivity.heartbeat; }
-fail(){ echo "$1" >&2; echo FAILED > ~/Ameen/adaptivity.status; exit 1; }
+echo RUNNING > ~/Ameen/adaptivity-${TAG:-small}.status
+beat(){ echo "$(date +%H:%M:%S) $1" > ~/Ameen/adaptivity-${TAG:-small}.heartbeat; }
+fail(){ echo "$1" >&2; echo FAILED > ~/Ameen/adaptivity-${TAG:-small}.status; exit 1; }
 dep(){ local tag=$1; shift
   (cd $EXP && ./deploy.sh "$@") > $OUT/deploy-$tag.log 2>&1 || fail "DEPLOY FAILED $tag"
   grep -q 'jar verified' $OUT/deploy-$tag.log || fail "jar not verified $tag"; }
@@ -40,7 +42,7 @@ for ARM in bucketed flat; do
   if [ $ARM = bucketed ]; then dep "A-$ARM" --jar $JARDIR/adaptive.jar --broker none $COMMON --phase-log true
   else dep "A-$ARM" --jar $JARDIR/adaptive.jar --broker none $COMMON --phase-log true --bucket-tuples $NOBUCKET; fi
   for MEM in $MEMS; do
-    beat "A $ARM $MEM"; snap; qt test $MEM >/dev/null
+    beat "A $ARM $MEM"; snap; qt $DV $MEM >/dev/null
     since | grep -o 'adaptive-sort-phase:.*' \
       | grep -oE 'spreadPct=[0-9]+|sortEvents=[0-9]+' | paste - - \
       | sed "s/^/SPREAD $ARM $MEM /" >> $OUT/spread.txt
@@ -61,8 +63,8 @@ for ROUND in $(seq 1 $ROUNDS); do
     esac
     for MEM in $MEMS; do
       beat "B round$ROUND $ARM $MEM"; snap
-      qt test $MEM >/dev/null
-      for r in $(seq 1 $REPS); do echo "AD $ROUND $ARM $MEM $(qt test $MEM)" >> $OUT/times.txt; done
+      qt $DV $MEM >/dev/null
+      for r in $(seq 1 $REPS); do echo "AD $ROUND $ARM $MEM $(qt $DV $MEM)" >> $OUT/times.txt; done
       # which reclamation paths actually fired -- proof the broker did something
       since | grep -o 'adaptive-sort: [a-z-]*' | sort | uniq -c \
         | sed "s/^/DEC $ARM $MEM /" >> $OUT/decisions.txt
@@ -70,4 +72,4 @@ for ROUND in $(seq 1 $ROUNDS); do
   done
   echo "round $ROUND: $(wc -l < $OUT/times.txt) samples" | tee -a $OUT/progress.txt
 done
-echo DONE > ~/Ameen/adaptivity.status; beat done
+echo DONE > ~/Ameen/adaptivity-${TAG:-small}.status; beat done
