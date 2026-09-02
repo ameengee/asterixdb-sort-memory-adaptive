@@ -26,7 +26,7 @@ dep(){ local tag=$1; shift
 qt(){ curl -s -o /dev/null -m 3600 -w '%{time_total}' "$Q" --data-urlencode \
   "statement=USE $1; SET \`compiler.sortmemory\` \"$2\"; SELECT VALUE count(*) FROM (SELECT VALUE r FROM ds AS r ORDER BY r.k) AS x;"; }
 
-: > $OUT/times.txt
+: > $OUT/times.txt; : > $OUT/fanin.txt
 for ROUND in $(seq 1 $ROUNDS); do
   for BT in $BUCKETS; do
     beat "round$ROUND bt=$BT deploy"
@@ -43,5 +43,24 @@ for ROUND in $(seq 1 $ROUNDS); do
   done
   echo "round $ROUND done: $(wc -l < $OUT/times.txt) samples" | tee -a $OUT/progress.txt
 done
+
+# ---- Phase 2: is it bucket SIZE or cascade WIDTH? -------------------------------------
+# Same default 256KB buckets, but vary how many the cascade merges at once. If a narrow,
+# multi-level cascade beats the single wide k-way merge at large budgets, the cost is the
+# winner tree touching thousands of scattered regions -- not the bucket size at all.
+for ROUND in $(seq 1 $ROUNDS); do
+  for FI in 2 16 128 1000000; do
+    beat "p2 round$ROUND fanin=$FI deploy"
+    dep "fi$FI-r$ROUND" --jar $JARDIR/adaptive.jar --broker none --heap 6g --kway true \
+        --merge-fan-in $FI --cap-mult 1 --auto-type-key true --phase-log true
+    for MEM in 320MB 2048MB; do
+      beat "p2 round$ROUND fanin=$FI $MEM"
+      qt test $MEM >/dev/null
+      for r in $(seq 1 $REPS); do echo "FI $ROUND $FI $MEM $(qt test $MEM)" >> $OUT/fanin.txt; done
+    done
+  done
+  echo "phase2 round $ROUND done" | tee -a $OUT/progress.txt
+done
+
 echo DONE > ~/Ameen/bucketscale.status
 beat done
