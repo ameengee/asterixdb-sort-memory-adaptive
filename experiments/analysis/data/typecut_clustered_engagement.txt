@@ -1,0 +1,16 @@
+EV off 32MB      24 runtimeDecisive=false
+EV off 32MB      56 runtimeDecisive=true
+EV off 512MB       8 runtimeDecisive=false
+EV off 2048MB       8 runtimeDecisive=false
+EV on 32MB      32 runtimeDecisive=false
+EV on 32MB      48 runtimeDecisive=true
+EV on 512MB       8 runtimeDecisive=false
+EV on 2048MB       8 runtimeDecisive=false
+EV off 32MB      24 runtimeDecisive=false
+EV off 32MB      56 runtimeDecisive=true
+EV off 512MB       8 runtimeDecisive=false
+EV off 2048MB       8 runtimeDecisive=false
+EV on 32MB      32 runtimeDecisive=false
+EV on 32MB      48 runtimeDecisive=true
+EV on 512MB       8 runtimeDecisive=false
+EV on 2048MB       8 runtimeDecisive=false
