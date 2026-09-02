@@ -32,7 +32,7 @@ fi
 BROKER=random; PERIOD=10; ACTION=reclaim; FRACTION=0.5
 VICTIM_PROB=0.3; SEED=0; DISTRIBUTION=normal; MEAN=0.5; STDDEV=0.15; DF=5
 SCRIPT_PATH=""; BUCKET_BYTES=262144; MERGE_FAN_IN=2; PARTIAL_SPILL=true
-VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false; CAPMULT=4; BUCKET_TUPLES=0; AUTOKEY=false; AUTOKEYINTS=3; TYPECUT=false
+VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false; CAPMULT=4; BUCKET_TUPLES=0; AUTOKEY=false; AUTOKEYINTS=3; TYPECUT=false; GCLOG=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --om-jar) OM_JAR_OVERRIDE="$2"; shift 2;;
     --auto-key-ints) AUTOKEYINTS="$2"; shift 2;;
     --type-cut) TYPECUT="$2"; shift 2;;
+    --gc-log) GCLOG="$2"; shift 2;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done
@@ -86,6 +87,9 @@ JVM_ARGS="$JVM_ARGS -Dhyracks.sort.phaseLog=$PHASE_LOG"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.kwayMerge=$KWAY"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.adaptCapMultiplier=$CAPMULT"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.bucketTargetTuples=$BUCKET_TUPLES"
+# GC logging for the 128MB-bump investigation: the bump appears in EVERY arm including untouched
+# stock, so it is environmental. GC is the first suspect and has never been measured.
+[[ "$GCLOG" == "true" ]] && JVM_ARGS="$JVM_ARGS -Xlog:gc:file=/tmp/gc-nc.log:time,uptime:filecount=0"
 # Runtime sort-key type detection is chosen at QUERY COMPILE time, which happens on the CC -- not
 # the NC. The CC is launched by bin/asterixcc, which honours $JAVA_OPTS; the NCs are spawned by the
 # NCService and only see jvm.args. Set it in BOTH: the CC picks the normalizer, the NC runs the
