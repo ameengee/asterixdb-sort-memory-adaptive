@@ -1,0 +1,120 @@
+EV stock-typefix 8MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 8MB bucketTargetBytes=262144 runtimeDecisive=true
+EV stock-typefix 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 32MB bucketTargetBytes=262144 runtimeDecisive=true
+EV stock-typefix 128MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 128MB bucketTargetBytes=524160 runtimeDecisive=true
+EV stock-typefix 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+EV stock-typefix 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+EV bucket-plain 8MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 8MB bucketTargetBytes=262144 runtimeDecisive=false
+EV bucket-plain 32MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 32MB bucketTargetBytes=262144 runtimeDecisive=false
+EV bucket-plain 128MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 128MB bucketTargetBytes=524160 runtimeDecisive=false
+EV bucket-plain 512MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 512MB bucketTargetBytes=2097024 runtimeDecisive=false
+EV bucket-plain 2048MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 2048MB bucketTargetBytes=8388480 runtimeDecisive=false
+EV bucket-typefix 8MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 8MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-typefix 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 32MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-typefix 128MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 128MB bucketTargetBytes=524160 runtimeDecisive=true
+EV bucket-typefix 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+EV bucket-typefix 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+EV bucket-best 8MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 8MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-best 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 32MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-best 128MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 128MB bucketTargetBytes=524160 runtimeDecisive=true
+EV bucket-best 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+EV bucket-best 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+EV stock-typefix 8MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 8MB bucketTargetBytes=262144 runtimeDecisive=true
+EV stock-typefix 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 32MB bucketTargetBytes=262144 runtimeDecisive=true
+EV stock-typefix 128MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 128MB bucketTargetBytes=524160 runtimeDecisive=true
+EV stock-typefix 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+EV stock-typefix 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+EV bucket-plain 8MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 8MB bucketTargetBytes=262144 runtimeDecisive=false
+EV bucket-plain 32MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 32MB bucketTargetBytes=262144 runtimeDecisive=false
+EV bucket-plain 128MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 128MB bucketTargetBytes=524160 runtimeDecisive=false
+EV bucket-plain 512MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 512MB bucketTargetBytes=2097024 runtimeDecisive=false
+EV bucket-plain 2048MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 2048MB bucketTargetBytes=8388480 runtimeDecisive=false
+EV bucket-typefix 8MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 8MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-typefix 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 32MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-typefix 128MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 128MB bucketTargetBytes=524160 runtimeDecisive=true
+EV bucket-typefix 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+EV bucket-typefix 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+EV bucket-best 8MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 8MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-best 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 32MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-best 128MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 128MB bucketTargetBytes=524160 runtimeDecisive=true
+EV bucket-best 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+EV bucket-best 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+EV stock-typefix 8MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 8MB bucketTargetBytes=262144 runtimeDecisive=true
+EV stock-typefix 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 32MB bucketTargetBytes=262144 runtimeDecisive=true
+EV stock-typefix 128MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 128MB bucketTargetBytes=524160 runtimeDecisive=true
+EV stock-typefix 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+EV stock-typefix 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV stock-typefix 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+EV bucket-plain 8MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 8MB bucketTargetBytes=262144 runtimeDecisive=false
+EV bucket-plain 32MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 32MB bucketTargetBytes=262144 runtimeDecisive=false
+EV bucket-plain 128MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 128MB bucketTargetBytes=524160 runtimeDecisive=false
+EV bucket-plain 512MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 512MB bucketTargetBytes=2097024 runtimeDecisive=false
+EV bucket-plain 2048MB adaptive-sort-keys: ptrSize=3 nkcs=none nkTotalLen=0 decisive=false comparators=1
+EV bucket-plain 2048MB bucketTargetBytes=8388480 runtimeDecisive=false
+EV bucket-typefix 8MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 8MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-typefix 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 32MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-typefix 128MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 128MB bucketTargetBytes=524160 runtimeDecisive=true
+EV bucket-typefix 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+EV bucket-typefix 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-typefix 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
+EV bucket-best 8MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 8MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-best 32MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 32MB bucketTargetBytes=262144 runtimeDecisive=true
+EV bucket-best 128MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 128MB bucketTargetBytes=524160 runtimeDecisive=true
+EV bucket-best 512MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 512MB bucketTargetBytes=2097024 runtimeDecisive=true
+EV bucket-best 2048MB adaptive-sort-keys: ptrSize=6 nkcs=1 nkTotalLen=3 decisive=false comparators=1
+EV bucket-best 2048MB bucketTargetBytes=8388480 runtimeDecisive=true
