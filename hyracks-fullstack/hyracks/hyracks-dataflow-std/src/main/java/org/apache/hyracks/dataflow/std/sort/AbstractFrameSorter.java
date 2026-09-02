@@ -160,6 +160,23 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     // most likely to reclaim. Sealing is also what interleaves sort work with arrival (fig. 1).
     // 0 disables scaling and pins the target to BUCKET_TARGET_BYTES.
     private static final int BUCKET_COUNT_TARGET = Integer.getInteger("hyracks.sort.bucketCountTarget", 256);
+
+    // [type-cut buckets] Close the current bucket when the sort column's TYPE changes, so every
+    // bucket holds one type. This matters because a runtime-detecting key cannot be exact over a
+    // mixed column -- a string key is a 4-byte prefix, so equal keys do not imply equal values and
+    // every tie must consult the comparator. Partitioned by type, the all-numeric buckets ARE exact
+    // and can skip the comparator; cross-type ordering is then handled by the ordering class during
+    // the merge, where it is correct by construction. Off by default: it only pays on mixed columns.
+    private static final boolean TYPE_CUT_BUCKETS =
+            Boolean.parseBoolean(System.getProperty("hyracks.sort.typeCutBuckets", "false"));
+    // Guard against pathological input: a column alternating types every tuple would otherwise seal
+    // a bucket per tuple. Below this many tuples we let the bucket stay mixed (and simply not exact).
+    private static final int TYPE_CUT_MIN_TUPLES = Math.max(1, Integer.getInteger("hyracks.sort.typeCutMinTuples", 64));
+    private static final int TAG_NONE = -1;
+    private int currentBucketTag = TAG_NONE; // type tag of the bucket being filled
+    // AND of every sealed bucket's exactness. The cascade/merge compares tuples ACROSS buckets, so
+    // it may only skip the comparator if EVERY bucket it could touch was exact.
+    private boolean runAllExact = true;
     private long bucketTargetBytes = BUCKET_TARGET_BYTES;
     // [U-curve investigation] Seal a bucket after this many TUPLES, if > 0 (0 = use the byte target).
     // Total slot moves for bucket-sort + one k-way merge is about N*(log2(bucketTuples) + 1), so the
@@ -319,6 +336,8 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         this.currentBucketTuples = 0;
         this.nkUsable = true;
         this.runtimeDecisive = false;
+        this.currentBucketTag = TAG_NONE;
+        this.runAllExact = true;
         this.numBuckets = 0;
         this.sortedFrameCount = 0;
         // phase counters are per-run: clear them so each run reports its own timeline
@@ -421,8 +440,8 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
             LOGGER.warn(
                     "adaptive-sort-run: framesLoaded={} bytesUsed={} budgetBytes={} fillPct={} tuples={} "
                             + "mergeFanIn={} bucketTargetBytes={} runtimeDecisive={}",
-                    getFrameCount(), totalMemoryUsed, maxSortMemory, fillPct, tupleCount, mergeFanIn,
-                    bucketTargetBytes, runtimeDecisive);
+                    getFrameCount(), totalMemoryUsed, maxSortMemory, fillPct, tupleCount, mergeFanIn, bucketTargetBytes,
+                    runtimeDecisive);
         }
         // ORIGINAL sort(): build ONE tPointers array over ALL frames, then sort the whole thing in one pass.
         // Now, pointers are built incrementally in insertFrame and full buckets are already sorted.
@@ -483,9 +502,25 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         int fieldSlotsLength = inputTupleAccessor.getFieldSlotsLength();
         ensureTPointersCapacity(builtTuples + tCount);
         for (int j = 0; j < tCount; ++j) {
-            int ptr = builtTuples++;
             int tStart = inputTupleAccessor.getTupleStartOffset(j);
             int tEnd = inputTupleAccessor.getTupleEndOffset(j);
+            if (TYPE_CUT_BUCKETS && nkcs != null) {
+                // Read the sort column's type tag before this tuple joins the bucket. Sealing here
+                // keeps every bucket single-typed, which is what lets the key be exact within it.
+                int tagOff = inputTupleAccessor.getFieldStartOffset(j, sortFields[0]) + tStart + fieldSlotsLength;
+                int tag = array[tagOff] & 0xff;
+                if (currentBucketTag != TAG_NONE && tag != currentBucketTag
+                        && builtTuples - currentBucketStart >= TYPE_CUT_MIN_TUPLES) {
+                    sealBucket(); // seals [currentBucketStart, builtTuples): everything before this tuple
+                    // The capacity check ran before this loop; a mid-frame seal can touch the
+                    // pointer arrays, so re-assert room for the tuples still to come in this frame.
+                    ensureTPointersCapacity(builtTuples + (tCount - j));
+                }
+                if (currentBucketTag == TAG_NONE) {
+                    currentBucketTag = tag;
+                }
+            }
+            int ptr = builtTuples++;
             tPointers[ptr * ptrSize + ID_FRAME_ID] = frameIndex;
             tPointers[ptr * ptrSize + ID_TUPLE_START] = tStart;
             tPointers[ptr * ptrSize + ID_TUPLE_END] = tEnd;
@@ -535,6 +570,12 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
             // [Stage 3] a freshly sorted bucket is a level-0 run. Then, while the mergeFanIn newest runs are
             // all the same size, merge them into one run of the next level up
             pushRun(builtTuples, 0);
+            // Fold this bucket's exactness into the run-level flag BEFORE any cross-bucket merge,
+            // then switch the cascade to the conservative across-buckets rule.
+            if (nkcs != null) {
+                runAllExact &= nkcs[0].isKeyExact();
+            }
+            refreshRuntimeDecisiveAcrossBuckets();
             long tc0 = PHASE_LOG ? System.nanoTime() : 0;
             while (numBuckets >= mergeFanIn && topRunsShareLevel(mergeFanIn)) {
                 mergeTopRuns(mergeFanIn);
@@ -547,6 +588,10 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         }
         currentBucketBytes = 0;
         currentBucketTuples = 0;
+        currentBucketTag = TAG_NONE;
+        if (nkcs != null) {
+            nkcs[0].resetKeyEpoch(); // the next bucket's exactness is judged on its own
+        }
     }
 
     // [Stage 3] record a new sorted run: its end tuple index and its merge level (size).
@@ -899,8 +944,20 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
      * remaining ones.
      */
     private void refreshRuntimeDecisive() {
-        runtimeDecisive = nkcs != null && nkUsable && nkcs.length == 1 && comparators.length == 1
-                && nkcs[0].isKeyExact();
+        runtimeDecisive = decisiveBase() && nkcs[0].isKeyExact();
+    }
+
+    /**
+     * Decisiveness for comparisons that span buckets (the cascade and the final merge). A bucket may
+     * be exact while its neighbour is not, so crossing comparisons may only skip the comparator when
+     * EVERY sealed bucket was exact.
+     */
+    private void refreshRuntimeDecisiveAcrossBuckets() {
+        runtimeDecisive = decisiveBase() && runAllExact && nkcs[0].isKeyExact();
+    }
+
+    private boolean decisiveBase() {
+        return nkcs != null && nkUsable && nkcs.length == 1 && comparators.length == 1;
     }
 
     protected final int compare(int tp1, int tp2) throws HyracksDataException {

@@ -32,7 +32,7 @@ fi
 BROKER=random; PERIOD=10; ACTION=reclaim; FRACTION=0.5
 VICTIM_PROB=0.3; SEED=0; DISTRIBUTION=normal; MEAN=0.5; STDDEV=0.15; DF=5
 SCRIPT_PATH=""; BUCKET_BYTES=262144; MERGE_FAN_IN=2; PARTIAL_SPILL=true
-VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false; CAPMULT=4; BUCKET_TUPLES=0; AUTOKEY=false; AUTOKEYINTS=3
+VICTIM_INTERVAL=10; HEAP=4g; BUILD=1; JAR_OVERRIDE=""; PHASE_LOG=false; KWAY=false; CAPMULT=4; BUCKET_TUPLES=0; AUTOKEY=false; AUTOKEYINTS=3; TYPECUT=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -61,11 +61,12 @@ while [[ $# -gt 0 ]]; do
     --auto-type-key) AUTOKEY="$2"; shift 2;;
     --om-jar) OM_JAR_OVERRIDE="$2"; shift 2;;
     --auto-key-ints) AUTOKEYINTS="$2"; shift 2;;
+    --type-cut) TYPECUT="$2"; shift 2;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done
 
-JVM_ARGS="-Xmx$HEAP"
+JVM_ARGS="-Xmx$HEAP -Dhyracks.sort.typeCutBuckets=$TYPECUT"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.broker=$BROKER"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.broker.period=$PERIOD"
 JVM_ARGS="$JVM_ARGS -Dhyracks.sort.broker.action=$ACTION"

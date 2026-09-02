@@ -50,7 +50,7 @@ run stock "$JARDIR/master.jar --broker stock --heap 6g"
 echo "=== ours, auto-detect ON ==="
 : > /tmp/mix.logsnap
 for f in $CL/logs/nc-*.log; do [ -f "$f" ] && echo "$f $(wc -l < "$f")" >> /tmp/mix.logsnap; done
-run ours "$JARDIR/adaptive.jar --broker none --heap 6g --kway true --cap-mult 1 --auto-type-key true"
+run ours "$JARDIR/adaptive.jar --broker none --heap 6g --kway true --cap-mult 1 --auto-type-key true ${TYPECUT_EXTRA:-}"
 echo "=== did the sorter report invalidation on THIS run? ==="
 # Per-file offsets: tailing a re-concatenation of several growing logs re-reads old content.
 since_snap(){ while read -r f n; do tail -n +$((n+1)) "$f"; done < /tmp/mix.logsnap; }
@@ -92,7 +92,7 @@ export DV=mixed2
 run stock "$JARDIR/master.jar --broker stock --heap 6g"
 : > /tmp/mix.logsnap
 for f in $CL/logs/nc-*.log; do [ -f "$f" ] && echo "$f $(wc -l < "$f")" >> /tmp/mix.logsnap; done
-run ours "$JARDIR/adaptive.jar --broker none --heap 6g --kway true --cap-mult 1 --auto-type-key true"
+run ours "$JARDIR/adaptive.jar --broker none --heap 6g --kway true --cap-mult 1 --auto-type-key true ${TYPECUT_EXTRA:-}"
 echo "--- invalidation MUST appear here ---"
 if since_snap | grep -qE 'normalized key abandoned|normalized keys invalidated'; then
   echo "  OK: fallback fired"

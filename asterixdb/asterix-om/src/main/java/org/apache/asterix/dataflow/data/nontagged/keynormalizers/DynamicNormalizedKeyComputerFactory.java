@@ -249,6 +249,13 @@ public class DynamicNormalizedKeyComputerFactory implements INormalizedKeyComput
             public boolean isKeyExact() {
                 return valid && exact;
             }
+
+            @Override
+            public void resetKeyEpoch() {
+                // `valid` deliberately survives: an unencodable type breaks ordering across the
+                // whole sort, not just within one partition. Only exactness is per-epoch.
+                exact = (w == 3);
+            }
         };
     }
 }

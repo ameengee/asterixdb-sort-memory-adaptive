@@ -56,4 +56,18 @@ public interface INormalizedKeyComputer {
     default boolean isKeyExact() {
         return false;
     }
+
+    /**
+     * Begin a new exactness epoch: {@link #isKeyExact()} should from here on describe only the keys
+     * produced after this call.
+     * <p>
+     * A caller that partitions its input so each partition holds a single type -- one bucket per type
+     * -- can then ask, per partition, whether that partition's keys were exact. A column of mixed
+     * ints and strings is never exact as a whole (a string key is a truncated prefix), but its
+     * all-integer partitions are, and those can skip the comparator entirely. Validity is NOT reset:
+     * a type the key cannot order at all stays a problem for the whole sort, because partitions are
+     * eventually merged against each other.
+     */
+    default void resetKeyEpoch() {
+    }
 }
