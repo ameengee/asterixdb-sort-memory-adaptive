@@ -1,0 +1,11 @@
+BUD none 512MB      68 denied budgetFrames=16383
+BUD light 512MB      92 denied budgetFrames=12287
+BUD light 512MB       4 victim-periodic-shrink budgetFrames=12287
+BUD moderate 512MB      70 denied budgetFrames=8191
+BUD moderate 512MB       2 victim-periodic-shrink budgetFrames=8191
+BUD repeated 512MB     516 denied budgetFrames=2047
+BUD repeated 512MB      12 denied budgetFrames=4095
+BUD repeated 512MB       4 denied budgetFrames=8191
+BUD repeated 512MB       4 victim-periodic-shrink budgetFrames=4095
+BUD repeated 512MB       4 victim-periodic-shrink budgetFrames=8191
+BUD repeated 512MB       4 victim-periodic-spill budgetFrames=2047
