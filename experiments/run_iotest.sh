@@ -17,14 +17,16 @@ export JAVA_HOME=${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk-amd64}
 ASM=$REPO_ROOT/asterixdb/asterix-server/target/asterix-server-0.9.10-SNAPSHOT-binary-assembly/apache-asterixdb-0.9.10-SNAPSHOT
 CL=$ASM/opt/local
 Q=http://127.0.0.1:19002/query/service
-OUT=~/Ameen/iotest; mkdir -p $OUT
+OUT=~/Ameen/iotest-${TAG:-small}; mkdir -p $OUT
 ROUNDS=${ROUNDS:-3}; REPS=${REPS:-2}
 MEMS=${MEMS:-"32MB 512MB 2048MB"}
+DV=${DV:-test}          # which dataverse to sort
+TAG=${TAG:-small}       # names the output dir, so runs at different scales do not overwrite
 BALLOON_GB=${BALLOON_GB:-40}
 
-echo RUNNING > ~/Ameen/iotest.status
-beat(){ echo "$(date +%H:%M:%S) $1" > ~/Ameen/iotest.heartbeat; }
-fail(){ echo "$1" >&2; echo FAILED > ~/Ameen/iotest.status; cleanup; exit 1; }
+echo RUNNING > ~/Ameen/iotest-${TAG:-small}.status
+beat(){ echo "$(date +%H:%M:%S) $1" > ~/Ameen/iotest-${TAG:-small}.heartbeat; }
+fail(){ echo "$1" >&2; echo FAILED > ~/Ameen/iotest-${TAG:-small}.status; cleanup; exit 1; }
 cleanup(){ [ -n "${BPID:-}" ] && kill "$BPID" 2>/dev/null; }
 trap cleanup EXIT INT TERM
 dep(){ local tag=$1; shift
@@ -54,11 +56,11 @@ for ROUND in $(seq 1 $ROUNDS); do
       for r in $(seq 1 $REPS); do
         beat "round$ROUND $ARM $MEM rep$r"
         ./drop_caches.sh "$CL/data" >> $OUT/drop.log 2>&1 || true
-        echo "IO $ROUND $ARM $MEM $(qt test $MEM)" >> $OUT/times.txt
+        echo "IO $ROUND $ARM $MEM $(qt $DV $MEM)" >> $OUT/times.txt
       done
     done
   done
   echo "round $ROUND: $(wc -l < $OUT/times.txt) samples; $(cachestat)" | tee -a $OUT/progress.txt
 done
 echo "final: $(cachestat)" | tee -a $OUT/mem.txt
-echo DONE > ~/Ameen/iotest.status; beat done
+echo DONE > ~/Ameen/iotest-${TAG:-small}.status; beat done

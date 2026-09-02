@@ -1,0 +1,3 @@
+before balloon: total=62 used=9 free=14 cache=38
+after balloon:  total=62 used=49 free=2 cache=11
+final: total=62 used=49 free=2 cache=10
