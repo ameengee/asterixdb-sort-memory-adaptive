@@ -200,8 +200,16 @@ public abstract class AbstractExternalSortRunGenerator extends AbstractSortRunGe
 
     private void logBudget(String reason) {
         if (ADAPT_LOGGER.isInfoEnabled()) {
-            ADAPT_LOGGER.info("adaptive-sort: {} budgetFrames={} (min={}, max={})", reason, currentSortFrames,
-                    adaptiveMinFrames, adaptiveMaxFrames);
+            // Report WHICH memory a reclaim is giving up, in the broker's own tiers:
+            //   easy   = budget not yet loaded -- free to surrender, nothing is lost
+            //   medium = loaded AND already sorted -- surrendering it costs a write, no re-sort
+            //   hard   = loaded but NOT yet sorted -- surrendering it repeats work
+            // shrinkTo() can only ever release FREE frames, i.e. easy memory. Medium and hard become
+            // easy only by spilling first, so the tier mix here says what a reclaim really costs.
+            MemoryStatus st = buildStatus();
+            ADAPT_LOGGER.info("adaptive-sort: {} budgetFrames={} (min={}, max={}) easy={} medium={} hard={}", reason,
+                    currentSortFrames, adaptiveMinFrames, adaptiveMaxFrames, st.easyFrames, st.mediumFrames,
+                    st.hardFrames);
         }
     }
 

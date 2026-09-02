@@ -1,0 +1,6 @@
+# Three separate demands spread through the query. Still BOUNDED -- unlike the periodic broker,
+# which reclaims half of whatever remains every 10 polls and drives the budget to the 16-frame
+# floor (measured: 113,495 decisions pinned at 16 frames while sorting 7GB).
+50,  reclaim, 0.5
+250, reclaim, 0.5
+600, reclaim, 0.5

@@ -1,0 +1,3 @@
+# One neighbour asks for a quarter of our memory, once. The realistic shape of memory pressure:
+# a bounded, one-off demand -- not a standing order to halve the budget forever.
+50, reclaim, 0.25
