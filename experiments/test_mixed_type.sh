@@ -39,6 +39,10 @@ DV=${DV:-mixed}   # which dataverse the run/compare below queries
 
 run(){ # $1=label $2=extra deploy args
   ./deploy.sh --jar $2 >/dev/null 2>&1
+  # deploy.sh RESTARTS the cluster, which starts fresh NC logs. Snapshot after that, or the
+  # offsets point past the end of the new files and every log check silently passes on nothing.
+  : > /tmp/mix.logsnap
+  for f in $CL/logs/nc-*.log; do [ -f "$f" ] && echo "$f $(wc -l < "$f")" >> /tmp/mix.logsnap; done
   curl -s -o /tmp/mix-$1.json -m 900 "$Q" --data-urlencode \
     'statement=USE mixed; SET `compiler.sortmemory` "4MB"; SELECT VALUE r FROM ds AS r ORDER BY r.k;'
   echo "  $1: $(python3 -c "
@@ -48,8 +52,6 @@ print(f'rows={len(r)} status={d.get(\"status\")}')")"
 echo "=== stock ordering (the reference) ==="
 run stock "$JARDIR/master.jar --broker stock --heap 6g"
 echo "=== ours, auto-detect ON ==="
-: > /tmp/mix.logsnap
-for f in $CL/logs/nc-*.log; do [ -f "$f" ] && echo "$f $(wc -l < "$f")" >> /tmp/mix.logsnap; done
 run ours "$JARDIR/adaptive.jar --broker none --heap 6g --kway true --cap-mult 1 --auto-type-key true ${TYPECUT_EXTRA:-}"
 echo "=== did the sorter report invalidation on THIS run? ==="
 # Per-file offsets: tailing a re-concatenation of several growing logs re-reads old content.
@@ -90,8 +92,6 @@ sql 'USE mixed2; INSERT INTO ds (SELECT VALUE {"id":x,
      FROM range(1,200000) AS x);' || exit 1
 export DV=mixed2
 run stock "$JARDIR/master.jar --broker stock --heap 6g"
-: > /tmp/mix.logsnap
-for f in $CL/logs/nc-*.log; do [ -f "$f" ] && echo "$f $(wc -l < "$f")" >> /tmp/mix.logsnap; done
 run ours "$JARDIR/adaptive.jar --broker none --heap 6g --kway true --cap-mult 1 --auto-type-key true ${TYPECUT_EXTRA:-}"
 echo "--- invalidation MUST appear here ---"
 if since_snap | grep -qE 'normalized key abandoned|normalized keys invalidated'; then

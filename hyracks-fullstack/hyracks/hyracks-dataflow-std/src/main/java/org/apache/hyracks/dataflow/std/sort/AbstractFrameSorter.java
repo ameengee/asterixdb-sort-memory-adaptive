@@ -169,9 +169,13 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
     // the merge, where it is correct by construction. Off by default: it only pays on mixed columns.
     private static final boolean TYPE_CUT_BUCKETS =
             Boolean.parseBoolean(System.getProperty("hyracks.sort.typeCutBuckets", "false"));
-    // Guard against pathological input: a column alternating types every tuple would otherwise seal
-    // a bucket per tuple. Below this many tuples we let the bucket stay mixed (and simply not exact).
-    private static final int TYPE_CUT_MIN_TUPLES = Math.max(1, Integer.getInteger("hyracks.sort.typeCutMinTuples", 64));
+    // Guard against pathological input. A FIXED floor is not enough: measured on a column whose type
+    // alternates every 1-2 tuples, a 64-tuple floor sealed a bucket every ~64 tuples -- roughly 150k
+    // buckets per run at a 512MB budget, and a 28x SLOWDOWN (228s vs 8s). The floor must scale with
+    // the bucket target so a type-cut bucket is never much smaller than a normally-sealed one; on
+    // constantly-alternating input the cut then degenerates to ordinary size-based sealing.
+    private static final int TYPE_CUT_MIN_TUPLES =
+            Math.max(1, Integer.getInteger("hyracks.sort.typeCutMinTuples", 1024));
     private static final int TAG_NONE = -1;
     private int currentBucketTag = TAG_NONE; // type tag of the bucket being filled
     // AND of every sealed bucket's exactness. The cascade/merge compares tuples ACROSS buckets, so
@@ -295,6 +299,16 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
      * letting a fixed byte target multiply buckets without limit. Re-evaluated on every budget
      * change, because the budget moves at runtime.
      */
+    /**
+     * Smallest bucket a type change may close: at least half a normal bucket. Type-cutting can then
+     * at most double the bucket count, never explode it.
+     */
+    private int minTypeCutTuples() {
+        long avgTupleBytes = tupleCount > 0 ? Math.max(1, totalMemoryUsed / tupleCount) : 0;
+        long targetTuples = avgTupleBytes > 0 ? bucketTargetBytes / avgTupleBytes : 0;
+        return (int) Math.max(TYPE_CUT_MIN_TUPLES, Math.min(Integer.MAX_VALUE, targetTuples / 2));
+    }
+
     private void applyBucketingPolicy() {
         if (BUCKET_COUNT_TARGET <= 0 || maxSortMemory <= 0 || maxSortMemory == Long.MAX_VALUE) {
             bucketTargetBytes = BUCKET_TARGET_BYTES;
@@ -498,7 +512,7 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
         bufferManager.getFrame(frameIndex, info);
         inputTupleAccessor.reset(info.getBuffer(), info.getStartOffset(), info.getLength());
         int tCount = inputTupleAccessor.getTupleCount();
-        byte[] array = inputTupleAccessor.getBuffer().array();
+        byte[] array = inputTupleAccessor.getBuffer().array(); // reassigned after a mid-loop seal
         int fieldSlotsLength = inputTupleAccessor.getFieldSlotsLength();
         ensureTPointersCapacity(builtTuples + tCount);
         for (int j = 0; j < tCount; ++j) {
@@ -510,11 +524,19 @@ public abstract class AbstractFrameSorter implements IFrameSorter {
                 int tagOff = inputTupleAccessor.getFieldStartOffset(j, sortFields[0]) + tStart + fieldSlotsLength;
                 int tag = array[tagOff] & 0xff;
                 if (currentBucketTag != TAG_NONE && tag != currentBucketTag
-                        && builtTuples - currentBucketStart >= TYPE_CUT_MIN_TUPLES) {
+                        && builtTuples - currentBucketStart >= minTypeCutTuples()) {
                     sealBucket(); // seals [currentBucketStart, builtTuples): everything before this tuple
                     // The capacity check ran before this loop; a mid-frame seal can touch the
                     // pointer arrays, so re-assert room for the tuples still to come in this frame.
                     ensureTPointersCapacity(builtTuples + (tCount - j));
+                    // CRITICAL: sealing sorts, and compare() re-points the SHARED inputTupleAccessor
+                    // at whichever frame it is comparing. Without restoring it here the rest of this
+                    // loop reads tuple offsets from the wrong frame -- which is an
+                    // ArrayIndexOutOfBoundsException when we are lucky and silent corruption when
+                    // we are not.
+                    bufferManager.getFrame(frameIndex, info);
+                    inputTupleAccessor.reset(info.getBuffer(), info.getStartOffset(), info.getLength());
+                    array = inputTupleAccessor.getBuffer().array();
                 }
                 if (currentBucketTag == TAG_NONE) {
                     currentBucketTag = tag;
