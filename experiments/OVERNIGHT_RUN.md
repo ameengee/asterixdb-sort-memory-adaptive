@@ -160,3 +160,27 @@ much memory a sort should get, why more is wasted, and why giving it back is fre
 above the threshold), bucketing's multi-type "harm" reversing into a benefit, and the reclaim cost
 splitting cleanly by threshold instead of looking uniformly free.
 
+## Reclaim, corrected (2026-09-03 19:42) — supersedes the earlier reclaim numbers
+
+The first attempt mislabelled its arms: "below threshold" reclaimed 8MB->4MB on a dataset whose
+threshold is 3.3MB, so no merge pass was ever added. Redone with budgets that straddle the
+threshold, and with a `staticlo` arm that separates two effects the first run conflated.
+
+| dataset | case | start -> post | static@start | static@post | reclaimed |
+|---|---|---|---|---|---|
+| 600MB | **crosses** | 4MB -> 2MB | 3.74s | 4.17s | 4.34s |
+| 600MB | stays | 64MB -> 32MB | 3.88s | 3.59s | 3.75s |
+| TPC-DS | **crosses** | 8MB -> 4MB | 17.38s | 19.04s | 17.82s |
+| TPC-DS | stays | 128MB -> 64MB | 17.63s | 17.45s | 17.47s |
+
+- **Ending up at a lower budget**: +11.5% / +9.5% when it CROSSES the threshold; -7.5% / -1.0% when
+  it does not. The merge pass, isolated.
+- **The reclaim machinery itself**: +4.2% / +4.4% (600MB), +0.1% / -6.4% (TPC-DS).
+- **Unpredicted**: reclaiming 8MB->4MB (17.82s) BEATS running the whole query at 4MB (19.04s) by
+  6.4% -- early work uses the larger budget before it is surrendered. A query that gives memory back
+  partway beats one that never had it, which argues for adaptivity over conservative static sizing.
+
+**Statement:** surrendering memory is free while the sort stays above its single-pass threshold;
+below it the sort pays for one extra merge pass (+9.5-11.5%) but still less than starting small; the
+machinery adds 0-4%.
+
