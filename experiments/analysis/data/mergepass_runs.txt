@@ -1,8 +1,17 @@
-RUNS ours 4MB 4562
-RUN1 ours 4MB adaptive-sort-run: framesLoaded=33 bytesUsed=4133712 budgetBytes=4161536 fillPct=99 tuples=63591
-RUNS ours 8MB 0
-RUNS ours 16MB 0
-RUNS ours 32MB 0
-RUNS ours 64MB 0
-RUNS ours 128MB 0
-RUNS ours 512MB 0
+RUNS ours 8MB 6846
+RUN1 ours 8MB adaptive-sort-run: framesLoaded=66 bytesUsed=8267424 budgetBytes=8355840 fillPct=98 tuples=127182
+RUNS ours 16MB 3396
+RUN1 ours 16MB adaptive-sort-run: framesLoaded=133 bytesUsed=16660112 budgetBytes=16744448 fillPct=99 tuples=256291
+RUNS ours 32MB 1692
+RUN1 ours 32MB adaptive-sort-run: framesLoaded=267 bytesUsed=33445488 budgetBytes=33521664 fillPct=99 tuples=514509
+RUNS ours 64MB 846
+RUN1 ours 64MB adaptive-sort-run: framesLoaded=535 bytesUsed=67016240 budgetBytes=67076096 fillPct=99 tuples=1030945
+RUNS ours 128MB 426
+RUN1 ours 128MB adaptive-sort-run: framesLoaded=1071 bytesUsed=134157744 budgetBytes=134184960 fillPct=99 tuples=2063817
+RUNS ours 512MB 108
+RUN1 ours 512MB adaptive-sort-run: framesLoaded=4285 bytesUsed=536756240 budgetBytes=536838144 fillPct=99 tuples=8257195
+RUNS stock-typed 8MB 0
+RUNS stock-typed 16MB 0
+RUNS stock-typed 32MB 0
+RUNS stock-typed 64MB 0
+RUNS stock-typed 128MB 0
