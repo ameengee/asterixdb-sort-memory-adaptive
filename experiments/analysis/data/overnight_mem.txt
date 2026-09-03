@@ -1,0 +1,2 @@
+before balloon: cache=2GB
+after balloon:  cache=2GB

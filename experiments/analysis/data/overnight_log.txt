@@ -1,0 +1,20 @@
+07:50:33 S test stock
+07:52:54 S test nobucket
+07:54:21 S test bucket
+07:55:46 S mixbig stock
+07:58:21 S mixbig nobucket
+08:00:17 S mixbig bucket
+08:02:08 S tpcds stock
+08:10:57 S tpcds nobucket
+08:16:34 S tpcds bucket
+08:22:13 N test bucketed
+08:22:42 N test flat
+08:23:10 N tpcds bucketed
+08:24:19 N tpcds flat
+08:25:28 R test none-hi @ 64MB
+08:25:57 R test reclaim-hi @ 64MB
+08:26:26 R test none-lo @ 8MB
+08:26:53 R test reclaim-lo @ 8MB
+08:27:22 R tpcds none-hi @ 128MB
+08:28:31 R tpcds reclaim-hi @ 128MB
+08:29:41 R tpcds none-lo @ 16MB

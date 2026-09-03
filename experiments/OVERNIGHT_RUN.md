@@ -118,4 +118,23 @@ stock's, and crossing that threshold is worth ~12.6%. Do it gated, with Ameen aw
   - Speedup over stock steady at **1.35-1.50x**.
   - The multi-type U-curve is NOT removed for anyone (+29% to +37%, all three arms) -- strings make
     the key inexact, so the comparator fallback scales with run size regardless of bucketing.
+- 08:30 **TPC-DS + neighbour + reclaim(test) COMPLETE. All five claims now I/O-verified.**
+
+  **TPC-DS store_sales (28.8M rows), threshold ~7.6MB:**
+
+  | arm | 4MB | 8MB | 16MB | 64MB | 256MB | 512MB | best->max |
+  |---|---|---|---|---|---|---|---|
+  | stock | 26.7 | 24.3 | 25.0 | 27.1 | 31.4 | 33.5 | **+37.8%** |
+  | nobucket | 19.9 | 17.1 | 16.7 | 16.9 | 17.6 | 17.8 | +6.8% |
+  | bucket | 19.3 | 17.3 | 17.0 | 17.2 | 18.0 | 18.0 | **+6.2%** |
+
+  speedup over stock **1.39x -> 1.85x** (grows with budget); bucketing cost -3.1% to +2.2% (neutral).
+
+  **Neighbour (under I/O):** 600MB bucketed spreadPct=**85** / 34 sort events vs flat **0** / 1 event;
+  TPC-DS bucketed **91** / 66 events vs flat **0** / 1.
+
+  **Reclaim (give back 50%):** 600MB above threshold **-2.7%** (free), below threshold **+7.7%**
+  (one merge pass); TPC-DS above threshold **-1.0%** (free).
+  -> **Releasing memory is free while the sort stays above its single-pass threshold, and costs one
+  merge pass below it.** Predicted ~12.6%, measured +7.7%.
 
