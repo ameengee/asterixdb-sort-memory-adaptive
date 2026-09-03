@@ -137,4 +137,26 @@ stock's, and crossing that threshold is worth ~12.6%. Do it gated, with Ameen aw
   (one merge pass); TPC-DS above threshold **-1.0%** (free).
   -> **Releasing memory is free while the sort stays above its single-pass threshold, and costs one
   merge pass below it.** Predicted ~12.6%, measured +7.7%.
+- 08:35 **RUN COMPLETE — 198 samples, 0 skips, balloon held throughout (cache 2-3GB).**
+  All six figures generated in `analysis/figures_io/`.
+
+  Final reclaim numbers: 600MB above threshold **-2.7%** / below **+7.7%**;
+  TPC-DS above **-1.0%** / below **+5.1%**. Free above, one merge pass below -- on both datasets.
+
+## FINAL SUMMARY (all under real I/O)
+
+| claim | evidence |
+|---|---|
+| Better neighbour | spreadPct **85** (600MB) / **91** (TPC-DS) vs **0**; 34-66 sort events vs 1 |
+| Bucketing no harm | single-type +-2%, TPC-DS -3.1..+2.2%, multi-type **-0.8 to -13.5% (helps)** |
+| U-curve solved | stock **+43%** (600MB) / **+37.8%** (TPC-DS) from its best; ours **+2%** / **+6.2%** |
+| Memory benefit | **-15%** crossing the single-pass threshold; flat above it |
+| Release memory | **free** above threshold (-1 to -2.7%), **+5.1 to +7.7%** below |
+
+**The organising idea:** the single-pass threshold `B < sqrt(dataPerPartition * frameSize)` says how
+much memory a sort should get, why more is wasted, and why giving it back is free down to that point.
+
+**Three findings only appeared once the page cache was removed:** the memory benefit (invisible
+above the threshold), bucketing's multi-type "harm" reversing into a benefit, and the reclaim cost
+splitting cleanly by threshold instead of looking uniformly free.
 

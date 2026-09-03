@@ -192,3 +192,7 @@ R tpcds reclaim-hi 128MB 17.463540
 R tpcds reclaim-hi 128MB 17.759039
 R tpcds none-lo 16MB 18.168335
 R tpcds none-lo 16MB 17.354885
+R tpcds none-lo 16MB 17.422225
+R tpcds reclaim-lo 16MB 18.432562
+R tpcds reclaim-lo 16MB 18.310025
+R tpcds reclaim-lo 16MB 17.031026

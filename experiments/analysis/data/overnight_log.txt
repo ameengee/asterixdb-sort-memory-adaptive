@@ -18,3 +18,4 @@
 08:27:22 R tpcds none-hi @ 128MB
 08:28:31 R tpcds reclaim-hi @ 128MB
 08:29:41 R tpcds none-lo @ 16MB
+08:30:49 R tpcds reclaim-lo @ 16MB

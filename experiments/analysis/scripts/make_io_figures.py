@@ -61,10 +61,16 @@ for ds, dslabel in DSLABEL.items():
         label_points(ax1, xs, ys, color, rank, len(present))
         print(f"  {ds:<8} {a:<9} " + " ".join(f"{x}MB:{y:.1f}" for x, y in s)
               + f"   slope={(ys[-1]/ys[0]-1)*100:+.1f}%")
+    ticks = sorted({x for _, s_ in present for x, _ in s_})
     for ax, ylab, title in ((ax1, "Sort time (s), median", "Cost"),
                             (ax2, "Relative to that arm's smallest budget",
                              "Does more memory help?")):
-        ax.set_xscale("log", base=2); ax.set_xlabel("Sort memory budget (MB)")
+        ax.set_xscale("log", base=2)
+        # label the ACTUAL budgets; matplotlib's default log ticks render as 2^n and hide which
+        # budgets were measured
+        ax.set_xticks(ticks); ax.set_xticklabels([str(t) for t in ticks])
+        ax.minorticks_off()
+        ax.set_xlabel("Sort memory budget (MB)")
         ax.set_ylabel(ylab); ax.set_title(title, fontsize=11); ax.grid(alpha=.3, ls=":")
     ax2.axhline(1.0, color="black", lw=.9, alpha=.6)
     ax1.legend(frameon=False, fontsize=9); ax1.margins(y=.18)
@@ -86,7 +92,10 @@ for ds, color in (("test", "#1d4ed8"), ("mixbig", "#b45309"), ("tpcds", "#0f766e
                     ha="center", fontsize=7, color=color)
     print(f"  bucketing cost {ds}: " + " ".join(f"{x}MB:{y:+.1f}%" for x, y in zip(common, ys)))
 ax.axhline(0, color="black", lw=1)
-ax.set_xscale("log", base=2); ax.set_xlabel("Sort memory budget (MB)")
+ax.set_xscale("log", base=2)
+allx = sorted({x for ds in DSLABEL for x in dict(series("S", ds, "bucket"))})
+ax.set_xticks(allx); ax.set_xticklabels([str(t) for t in allx]); ax.minorticks_off()
+ax.set_xlabel("Sort memory budget (MB)")
 ax.set_ylabel("Bucketing's effect (%)   negative = faster")
 ax.set_title("Does bucketing do harm? (same key, bucketing on vs off)", fontsize=12)
 ax.grid(alpha=.3, ls=":"); ax.legend(frameon=False, fontsize=9)
