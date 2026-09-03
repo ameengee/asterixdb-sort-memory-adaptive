@@ -1,0 +1,8 @@
+RUNS ours 4MB 4562
+RUN1 ours 4MB adaptive-sort-run: framesLoaded=33 bytesUsed=4133712 budgetBytes=4161536 fillPct=99 tuples=63591
+RUNS ours 8MB 0
+RUNS ours 16MB 0
+RUNS ours 32MB 0
+RUNS ours 64MB 0
+RUNS ours 128MB 0
+RUNS ours 512MB 0
