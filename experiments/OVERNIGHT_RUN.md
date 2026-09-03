@@ -91,3 +91,15 @@ stock's, and crossing that threshold is worth ~12.6%. Do it gated, with Ameen aw
 ## Status log
 
 - 07:50 launched; balloon holding, cache 0-2GB
+- 07:57 **`test` (600MB single-type) COMPLETE — every prediction held.**
+  Threshold ~3.3MB, and crossing it (2MB->4MB) is worth **-15% stock / -15% nobucket / -14% bucket**.
+
+  | arm | 2MB | 4MB | 8MB | 32MB | 128MB | 512MB |
+  |---|---|---|---|---|---|---|
+  | stock | 6.88 | 5.87 | 5.90 | 6.33 | 7.94 | 8.37 |
+  | nobucket | 4.36 | 3.72 | 3.64 | 3.72 | 3.98 | 3.63 |
+  | bucket | 4.28 | 3.66 | 3.60 | 3.60 | 4.00 | 3.68 |
+
+  - **U-curve**: stock from its best (4MB) to 512MB is **+43%**; ours is **+2%** (flat).
+  - **Memory benefit**: real, and located exactly at the predicted threshold.
+  - **No harm**: bucketing faster-or-equal at 5 of 6 budgets.
