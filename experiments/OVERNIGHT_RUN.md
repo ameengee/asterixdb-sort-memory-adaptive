@@ -103,3 +103,19 @@ stock's, and crossing that threshold is worth ~12.6%. Do it gated, with Ameen aw
   - **U-curve**: stock from its best (4MB) to 512MB is **+43%**; ours is **+2%** (flat).
   - **Memory benefit**: real, and located exactly at the predicted threshold.
   - **No harm**: bucketing faster-or-equal at 5 of 6 budgets.
+- 08:09 **`mixbig` (600MB multi-type) COMPLETE — one result REVERSES a cached finding.**
+
+  | arm | 2MB | 4MB | 8MB | 32MB | 128MB | 512MB | best->512MB |
+  |---|---|---|---|---|---|---|---|
+  | stock | 7.35 | 6.61 | 6.62 | 6.97 | 8.51 | 9.02 | +36.5% |
+  | nobucket | 5.81 | 5.10 | 4.99 | 5.07 | 5.71 | 6.43 | +28.9% |
+  | bucket | 5.45 | 4.41 | 4.87 | 4.81 | 5.67 | 6.03 | +36.8% |
+
+  - **Bucketing HELPS on multi-type under I/O**: -6.2/-13.5/-2.5/-5.0/-0.8/-6.3%. Cache-resident the
+    same comparison showed bucketing COSTING 6-8%. The flip is the neighbour property paying off --
+    multi-type comparisons are expensive (comparator fallback), so there is ample CPU to overlap
+    with real I/O. **The earlier "bucketing harms multi-type" finding was a cache artifact.**
+  - Speedup over stock steady at **1.35-1.50x**.
+  - The multi-type U-curve is NOT removed for anyone (+29% to +37%, all three arms) -- strings make
+    the key inexact, so the comparator fallback scales with run size regardless of bucketing.
+
