@@ -1,0 +1,9 @@
+before balloon: used=1GB cache=6GB
+after balloon:  used=50GB cache=6GB
+  8MB done: used=53GB cache=5GB
+  16MB done: used=47GB cache=8GB
+  32MB done: used=47GB cache=9GB
+  64MB done: used=47GB cache=9GB
+  128MB done: used=50GB cache=7GB
+  512MB done: used=53GB cache=3GB
+final: used=53GB cache=3GB

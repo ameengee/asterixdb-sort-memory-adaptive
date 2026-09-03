@@ -113,6 +113,13 @@ multi-type · `mixclust` type-clustered · `tpcds` real TPC-DS · `tpcdsnn2` its
 - **The "128MB bump" is a merge-pass step**, not GC. 5M rows/partition x 65B = 325MB, so 384MB holds
   a partition in ONE run (no merge) while 256MB needs two. Moves with data size. GC ruled out
   (pauses 1-100ms against 3.3s queries, uncorrelated).
+- **Memory buys exactly one thing: removing a merge pass.** Measured at 7GB with run files forced
+  to disk (cache squeezed 31GB -> 0-8GB via balloon): two-pass mean 151.2s vs single-pass mean
+  134.3s, so **an extra pass costs 12.6%**; and across single-pass budgets 32MB->512MB (a 16x
+  increase) the spread is **1.7%**. Forcing run I/O to disk costs +6.4% at 8MB (most runs) and ~0%
+  at every single-pass budget -- because a single-pass merge writes and reads each run exactly once,
+  so total bytes are invariant to run count. "Fewer, longer runs are faster" holds only when it
+  eliminates a PASS, or on spinning disks where per-stream seek cost is real; not on NVMe.
 - **More memory helps only while it removes merge passes.** Comparisons are ~N*log2(runSize) +
   N*log2(numRuns) = N*log2(N), a constant — memory only *moves* work between phases. At 7GB:
   8MB=163.0s, 32MB=130.3s, 512MB=134.8s, 2048MB=146.8s. Minimum at 32MB.
