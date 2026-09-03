@@ -27,9 +27,10 @@ for line in open(SRC):
     if len(f) == 5:
         rows[(f[0], f[1], f[2], f[3])].append(float(f[4]))
 
-DSLABEL = {"test": "600MB synthetic, single type",
-           "mixbig": "600MB synthetic, multi-type",
-           "tpcds": "TPC-DS store_sales (28.8M rows)"}
+# Paper scope: TPC-DS leads; the synthetic multi-type set is cut (see METHODOLOGY.md 5b). The
+# synthetic single-type set is kept only as a secondary scale point.
+DSLABEL = {"tpcds": "TPC-DS store_sales (28.8M rows)",
+           "test": "600MB synthetic, single type"}
 ARM = {"stock":    ("Stock AsterixDB",              "#b91c1c", "o", "-"),
        "nobucket": ("Ours: type fix, no bucketing", "#0f766e", "s", "--"),
        "bucket":   ("Ours: type fix + bucketing",   "#1d4ed8", "D", "-")}

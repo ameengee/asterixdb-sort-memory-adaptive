@@ -146,6 +146,22 @@ multi-type · `mixclust` type-clustered · `tpcds` real TPC-DS · `tpcdsnn2` its
 
 ---
 
+## 5b. Paper scope decision (2026-09-03)
+
+**Lead with TPC-DS. The multi-type result is CUT.**
+
+- TPC-DS is a real benchmark with a real schema and, critically, **real nulls**: `ss_sales_price` is
+  declared `double?` and 1,297,324 of 28,800,991 rows (4.5%) are null, straight from `dsdgen`. A
+  nullable type is a union, so the provider returns no normalizer -- our headline failure, on data
+  and a schema we did not construct.
+- The synthetic multi-type column (`mixbig`) is CUT from the paper: it is synthetic, its curve is not
+  flattened (+28-37%), and bucketing makes that slope worse. Defending it costs more than it earns.
+  Data stays in the repo; it is simply not reported.
+- Note the two cases are NOT equivalent: a nullable numeric column is exactly representable (numeric
+  + null ordering classes), so `runtimeDecisive` can be true; a column of mixed CONCRETE types
+  (int64 + string) is not, because a 4-byte string prefix is never injective. TPC-DS therefore
+  exercises the union path but not the inexact-key path.
+
 ## 6. Retracted claims (do not resurrect)
 
 | claim | why it was wrong |
