@@ -124,6 +124,19 @@ multi-type · `mixclust` type-clustered · `tpcds` real TPC-DS · `tpcdsnn2` its
   N*log2(numRuns) = N*log2(N), a constant — memory only *moves* work between phases. At 7GB:
   8MB=163.0s, 32MB=130.3s, 512MB=134.8s, 2048MB=146.8s. Minimum at 32MB.
 
+### Tuning (600MB, 225 samples, noise floor 3.9%)
+- **Bucket SIZE must scale with the budget; fan-in does not matter.** Sweeping ABSOLUTE
+  bucketTargetBytes with the scaling policy off: at a 512MB budget, 64KB buckets cost **+92%**
+  (7.22s vs 3.76s) and 256KB costs **+18%**, because count = budget/size (64KB at 512MB = 8192
+  buckets for the cascade). Best counts were 32/128/32 at 8/32/512MB, so anywhere in ~32-500
+  buckets is flat -- which is what `bucketCountTarget=256` delivers. AsterixDB's original FIXED
+  256KB target would cost ~18% at 512MB and worse above.
+- Across fan-in 2 -> 1000000 at fixed bucket size the spread is 2-5%, inside noise, at every budget.
+  `--merge-fan-in 1000000` buys nothing; k-way's benefit saturates immediately.
+- **Do not sweep `bucketCountTarget`** -- it sets `max(256KB, budget/count)`, so the floor pins it at
+  small budgets and two thirds of such a grid measures nothing. Sweep absolute `--bucket-bytes` with
+  `--bucket-count 0`.
+
 ### Negative results (keep them in the paper)
 - **Type-cut buckets do not pay** in any regime: +4.8/+15.7/+1.9% interleaved, -1.2 to +0.9%
   clustered. On clustered data ordinary size-based bucketing already yields homogeneous buckets.
