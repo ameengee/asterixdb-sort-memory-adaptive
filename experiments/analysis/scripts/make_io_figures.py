@@ -82,7 +82,8 @@ for ds, dslabel in DSLABEL.items():
 
 # ---- 4  bucketing's marginal cost: same key, bucketing on vs off ----
 fig, ax = plt.subplots(figsize=(8.4, 5.0))
-for ds, color in (("test", "#1d4ed8"), ("mixbig", "#b45309"), ("tpcds", "#0f766e")):
+COLOR = {"tpcds": "#0f766e", "test": "#1d4ed8"}
+for ds, color in [(d, COLOR[d]) for d in DSLABEL if d in COLOR]:
     nb = dict(series("S", ds, "nobucket")); bk = dict(series("S", ds, "bucket"))
     common = sorted(set(nb) & set(bk))
     if not common: continue
